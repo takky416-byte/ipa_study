@@ -3,7 +3,12 @@
 
   var QUESTIONS = (window.QUESTIONS_SAMPLE || []).concat(window.QUESTIONS_PAST || []);
   var HISTORY_KEY = "itsmStudyHistory_v1";
+  var SESSION_LOG_KEY = "itsmSessionLog_v1";
+  var MAX_SESSION_LOG = 300;
+  var HEATMAP_DAYS = 84;
   var CHOICE_KEYS = ["ア", "イ", "ウ", "エ"];
+
+  var MASTERY_LABELS = { unseen: "未学習", weak: "要復習", learning: "学習中", mastered: "習得済み" };
 
   var app = document.getElementById("app");
   var session = null; // current quiz session state
@@ -39,6 +44,78 @@
 
   function resetHistory() {
     localStorage.removeItem(HISTORY_KEY);
+  }
+
+  function getMastery(entry) {
+    if (!entry || entry.shown === 0) return "unseen";
+    if (entry.lastResult === true) return "mastered";
+    if (entry.correct === 0) return "weak";
+    return "learning";
+  }
+
+  // ---------- Session log (localStorage) ----------
+  function loadSessionLog() {
+    try {
+      var raw = localStorage.getItem(SESSION_LOG_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveSessionLog(log) {
+    try {
+      localStorage.setItem(SESSION_LOG_KEY, JSON.stringify(log));
+    } catch (e) {
+      // ignore quota / privacy-mode errors
+    }
+  }
+
+  function appendSessionLog(entry) {
+    var log = loadSessionLog();
+    log.push(entry);
+    if (log.length > MAX_SESSION_LOG) log = log.slice(log.length - MAX_SESSION_LOG);
+    saveSessionLog(log);
+  }
+
+  function resetSessionLog() {
+    localStorage.removeItem(SESSION_LOG_KEY);
+  }
+
+  function computeStudyStats(log) {
+    var dayCounts = {};
+    log.forEach(function (e) {
+      var day = e.date.slice(0, 10);
+      dayCounts[day] = (dayCounts[day] || 0) + 1;
+    });
+    var days = Object.keys(dayCounts).sort();
+
+    function toDate(s) { return new Date(s + "T00:00:00"); }
+
+    // current streak: walk back from today (or yesterday if today has no session yet)
+    var current = 0;
+    var cursor = new Date();
+    var todayStr = cursor.toISOString().slice(0, 10);
+    if (!dayCounts[todayStr]) cursor.setDate(cursor.getDate() - 1);
+    while (dayCounts[cursor.toISOString().slice(0, 10)]) {
+      current += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    // longest streak
+    var longest = 0, run = 0, prev = null;
+    days.forEach(function (d) {
+      if (prev) {
+        var diff = Math.round((toDate(d) - toDate(prev)) / 86400000);
+        run = diff === 1 ? run + 1 : 1;
+      } else {
+        run = 1;
+      }
+      longest = Math.max(longest, run);
+      prev = d;
+    });
+
+    return { dayCounts: dayCounts, studiedDays: days.length, current: current, longest: longest };
   }
 
   // ---------- Helpers ----------
@@ -341,6 +418,10 @@
     var correctCount = answers.filter(function (a) { return a.correct; }).length;
     var pct = total > 0 ? Math.round((correctCount / total) * 1000) / 10 : 0;
 
+    if (total > 0) {
+      appendSessionLog({ date: new Date().toISOString(), title: session.title, total: total, correct: correctCount });
+    }
+
     var card = el("div", { class: "card" });
     card.appendChild(el("h2", { text: session.title + " - 結果" }));
     card.appendChild(el("div", { class: "score-hero" }, [
@@ -406,80 +487,166 @@
     }
   }
 
-  function renderStats() {
+  function progressRow(label, done, total, rightText) {
+    var pct = total > 0 ? Math.round((done / total) * 1000) / 10 : 0;
+    var row = el("div", { class: "progress-row" });
+    row.appendChild(el("div", { class: "progress-row-label" }, [
+      el("span", { text: label }),
+      el("span", { text: rightText !== undefined ? rightText : (done + " / " + total + "（" + pct + "%）") })
+    ]));
+    var track = el("div", { class: "progress-bar-track" });
+    track.appendChild(el("div", { class: "progress-bar-fill", style: "width:" + pct + "%" }));
+    row.appendChild(track);
+    return row;
+  }
+
+  function renderAchievement() {
     session = null;
     clear(app);
     var history = loadHistory();
-    var answeredIds = Object.keys(history);
 
-    var card = el("div", { class: "card" });
-    card.appendChild(el("h2", { text: "成績・学習履歴" }));
+    var counts = { unseen: 0, weak: 0, learning: 0, mastered: 0 };
+    QUESTIONS.forEach(function (q) {
+      counts[getMastery(history[q.id])] += 1;
+    });
+    var totalQ = QUESTIONS.length;
+    var masteredPct = totalQ > 0 ? Math.round((counts.mastered / totalQ) * 1000) / 10 : 0;
 
-    if (answeredIds.length === 0) {
-      card.appendChild(el("div", { class: "empty-state", text: "まだ演習履歴がありません。ホームから演習を始めましょう。" }));
-      app.appendChild(card);
+    var headCard = el("div", { class: "card" });
+    headCard.appendChild(el("h2", { text: "達成度" }));
+    headCard.appendChild(el("p", { text: "「習得済み」は、直近の解答が正解だった問題の数です（初めて解いてすぐ正解した問題も含みます）。" }));
+    var bigRow = el("div", { class: "big-progress" });
+    bigRow.appendChild(progressRow("全体の習得率", counts.mastered, totalQ, counts.mastered + " / " + totalQ + "問（" + masteredPct + "%）"));
+    headCard.appendChild(bigRow);
+    headCard.appendChild(el("div", { class: "summary-grid" }, [
+      summaryStat(counts.mastered, "習得済み"),
+      summaryStat(counts.learning, "学習中"),
+      summaryStat(counts.weak, "要復習"),
+      summaryStat(counts.unseen, "未学習")
+    ]));
+    app.appendChild(headCard);
+
+    if (counts.mastered + counts.learning + counts.weak === 0) {
+      var emptyCard = el("div", { class: "card" });
+      emptyCard.appendChild(el("div", { class: "empty-state", text: "まだ演習履歴がありません。ホームから演習を始めましょう。" }));
+      app.appendChild(emptyCard);
       return;
     }
 
-    var totalShown = 0, totalCorrect = 0;
-    answeredIds.forEach(function (id) {
-      totalShown += history[id].shown;
-      totalCorrect += history[id].correct;
-    });
-    var overallRate = totalShown > 0 ? Math.round((totalCorrect / totalShown) * 1000) / 10 : 0;
-
-    card.appendChild(el("div", { class: "summary-grid" }, [
-      summaryStat(answeredIds.length, "学習済み問題数"),
-      summaryStat(totalShown, "延べ回答数"),
-      summaryStat(overallRate + "%", "累積正答率")
-    ]));
-    app.appendChild(card);
-
-    // category breakdown across all history
+    // category achievement
+    var catCard = el("div", { class: "card" });
+    catCard.appendChild(el("h2", { text: "分野別の達成度" }));
     var byCat = {};
     QUESTIONS.forEach(function (q) {
-      var h = history[q.id];
-      if (!h) return;
-      if (!byCat[q.category]) byCat[q.category] = { shown: 0, correct: 0 };
-      byCat[q.category].shown += h.shown;
-      byCat[q.category].correct += h.correct;
+      if (!byCat[q.category]) byCat[q.category] = { total: 0, mastered: 0 };
+      byCat[q.category].total += 1;
+      if (getMastery(history[q.id]) === "mastered") byCat[q.category].mastered += 1;
     });
-    var catCard = el("div", { class: "card" });
-    catCard.appendChild(el("h2", { text: "分野別正答率" }));
-    var table = el("table", { class: "breakdown" });
-    table.appendChild(el("tr", {}, [
-      el("th", { text: "分野" }),
-      el("th", { text: "正答/回答" }),
-      el("th", { text: "正答率" })
-    ]));
     Object.keys(byCat).forEach(function (cat) {
       var c = byCat[cat];
-      var rate = c.shown > 0 ? Math.round((c.correct / c.shown) * 1000) / 10 : 0;
-      table.appendChild(el("tr", {}, [
-        el("td", { text: cat }),
-        el("td", { text: c.correct + " / " + c.shown }),
-        el("td", { text: rate + "%" })
-      ]));
+      catCard.appendChild(progressRow(cat, c.mastered, c.total));
     });
-    catCard.appendChild(table);
     app.appendChild(catCard);
+
+    // year achievement (past exams)
+    var pastSets = getPastExamSets();
+    if (pastSets.length > 0) {
+      var yearCard = el("div", { class: "card" });
+      yearCard.appendChild(el("h2", { text: "年度別の達成度（実際の過去問）" }));
+      pastSets.forEach(function (s) {
+        var mastered = s.questions.filter(function (q) { return getMastery(history[q.id]) === "mastered"; }).length;
+        yearCard.appendChild(progressRow(s.year + "年" + s.session, mastered, s.questions.length));
+      });
+      app.appendChild(yearCard);
+    }
 
     // reset
     var resetCard = el("div", { class: "card" });
-    resetCard.appendChild(el("h2", { text: "学習履歴のリセット" }));
-    resetCard.appendChild(el("p", { text: "これまでの解答履歴・正答率の記録をすべて削除します。この操作は取り消せません。" }));
+    resetCard.appendChild(el("h2", { text: "学習記録のリセット" }));
+    resetCard.appendChild(el("p", { text: "達成度（解答履歴・正答率）と学習履歴（演習ログ）をすべて削除します。この操作は取り消せません。" }));
     resetCard.appendChild(el("button", { class: "btn secondary", onclick: function () {
-      if (confirm("学習履歴をすべてリセットしますか？")) {
+      if (confirm("達成度・学習履歴をすべてリセットしますか？")) {
         resetHistory();
-        renderStats();
+        resetSessionLog();
+        renderAchievement();
       }
-    } }, [document.createTextNode("履歴をリセット")]));
+    } }, [document.createTextNode("記録をリセット")]));
     app.appendChild(resetCard);
+  }
+
+  function renderHistory() {
+    session = null;
+    clear(app);
+    var log = loadSessionLog();
+
+    if (log.length === 0) {
+      var emptyCard = el("div", { class: "card" });
+      emptyCard.appendChild(el("h2", { text: "学習履歴" }));
+      emptyCard.appendChild(el("div", { class: "empty-state", text: "まだ演習履歴がありません。ホームから演習を始めましょう。" }));
+      app.appendChild(emptyCard);
+      return;
+    }
+
+    var stats = computeStudyStats(log);
+    var totalAnswered = log.reduce(function (sum, e) { return sum + e.total; }, 0);
+
+    var summaryCard = el("div", { class: "card" });
+    summaryCard.appendChild(el("h2", { text: "学習履歴" }));
+    summaryCard.appendChild(el("div", { class: "summary-grid" }, [
+      summaryStat(stats.studiedDays, "学習した日数"),
+      summaryStat(log.length, "演習回数"),
+      summaryStat(stats.current, "連続学習日数"),
+      summaryStat(stats.longest, "最長連続記録")
+    ]));
+    summaryCard.appendChild(el("p", { text: "延べ解答数: " + totalAnswered + "問" }));
+    summaryCard.appendChild(buildHeatmap(stats.dayCounts));
+    app.appendChild(summaryCard);
+
+    var listCard = el("div", { class: "card" });
+    listCard.appendChild(el("h2", { text: "直近の演習ログ" }));
+    var list = el("div", { class: "history-list" });
+    log.slice().reverse().slice(0, 30).forEach(function (e) {
+      var pct = e.total > 0 ? Math.round((e.correct / e.total) * 1000) / 10 : 0;
+      var d = new Date(e.date);
+      var dateText = isNaN(d.getTime()) ? e.date : (d.getMonth() + 1) + "/" + d.getDate() + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+      list.appendChild(el("div", { class: "history-item" }, [
+        el("span", { class: "hi-date", text: dateText }),
+        el("span", { class: "hi-title", text: e.title }),
+        el("span", { class: "hi-score", text: e.correct + "/" + e.total + "（" + pct + "%）" })
+      ]));
+    });
+    listCard.appendChild(list);
+    app.appendChild(listCard);
+  }
+
+  function buildHeatmap(dayCounts) {
+    var wrap = el("div", { class: "heatmap-wrap" });
+    var grid = el("div", { class: "heatmap-grid" });
+    var d = new Date();
+    d.setDate(d.getDate() - (HEATMAP_DAYS - 1));
+    for (var i = 0; i < HEATMAP_DAYS; i++) {
+      var s = d.toISOString().slice(0, 10);
+      var count = dayCounts[s] || 0;
+      var level = count === 0 ? 0 : count === 1 ? 1 : count <= 3 ? 2 : 3;
+      grid.appendChild(el("div", { class: "heatmap-cell level-" + level, title: s + "：" + count + "回" }));
+      d.setDate(d.getDate() + 1);
+    }
+    wrap.appendChild(grid);
+    wrap.appendChild(el("div", { class: "heatmap-legend" }, [
+      el("span", { text: "少ない" }),
+      el("span", { class: "heatmap-cell level-0" }),
+      el("span", { class: "heatmap-cell level-1" }),
+      el("span", { class: "heatmap-cell level-2" }),
+      el("span", { class: "heatmap-cell level-3" }),
+      el("span", { text: "多い" })
+    ]));
+    return wrap;
   }
 
   // ---------- Nav wiring ----------
   document.getElementById("navHome").addEventListener("click", renderHome);
-  document.getElementById("navStats").addEventListener("click", renderStats);
+  document.getElementById("navAchievement").addEventListener("click", renderAchievement);
+  document.getElementById("navHistory").addEventListener("click", renderHistory);
   document.getElementById("homeLink").addEventListener("click", renderHome);
 
   // ---------- Init ----------

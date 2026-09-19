@@ -337,6 +337,90 @@ table.breakdown th { color: var(--color-text-sub); font-weight: 600; }
   color: var(--color-text-sub);
 }
 
+/* Achievement / progress */
+.progress-row {
+  margin-bottom: 14px;
+}
+.progress-row:last-child { margin-bottom: 0; }
+.progress-row-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+  color: var(--color-text-sub);
+}
+.progress-row-label span:first-child {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.big-progress .progress-bar-track {
+  height: 14px;
+  margin-bottom: 18px;
+}
+.big-progress .progress-row-label {
+  font-size: 0.95rem;
+}
+
+/* Study history */
+.heatmap-wrap {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+.heatmap-grid {
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: 13px;
+  gap: 3px;
+  padding-bottom: 4px;
+}
+.heatmap-cell {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  background: #ebedf0;
+}
+.heatmap-cell.level-1 { background: #c6e6c1; }
+.heatmap-cell.level-2 { background: #7bc9a0; }
+.heatmap-cell.level-3 { background: var(--color-primary); }
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 0.72rem;
+  color: var(--color-text-sub);
+}
+.heatmap-legend .heatmap-cell { display: inline-block; }
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  flex-wrap: wrap;
+}
+.history-item .hi-date {
+  color: var(--color-text-sub);
+  min-width: 90px;
+}
+.history-item .hi-title {
+  flex: 1;
+  min-width: 120px;
+}
+.history-item .hi-score {
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
 @media (max-width: 560px) {
   .site-title { font-size: 1rem; }
   .score-hero .score-num { font-size: 2rem; }
