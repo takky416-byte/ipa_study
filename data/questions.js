@@ -5,7 +5,7 @@
  * に基づいて作成したオリジナルの演習問題です。
  * category / choices / answer(ア〜エ) / explanation の形式を守れば自由に追加できます。
  */
-window.QUESTIONS = [
+window.QUESTIONS_SAMPLE = [
   // ===== サービスマネジメント全般 =====
   {
     id: "SM-001",

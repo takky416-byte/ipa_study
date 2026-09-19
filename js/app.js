@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var QUESTIONS = window.QUESTIONS || [];
+  var QUESTIONS = (window.QUESTIONS_SAMPLE || []).concat(window.QUESTIONS_PAST || []);
   var HISTORY_KEY = "itsmStudyHistory_v1";
   var CHOICE_KEYS = ["ア", "イ", "ウ", "エ"];
 
@@ -55,6 +55,22 @@
     var set = {};
     QUESTIONS.forEach(function (q) { set[q.category] = true; });
     return Object.keys(set);
+  }
+
+  function getPastExamSets() {
+    var map = {};
+    QUESTIONS.forEach(function (q) {
+      if (!q.year) return;
+      var key = q.year + "_" + q.session;
+      if (!map[key]) map[key] = { year: q.year, session: q.session, questions: [] };
+      map[key].questions.push(q);
+    });
+    var list = Object.keys(map).map(function (k) { return map[k]; });
+    list.sort(function (a, b) { return b.year - a.year; });
+    list.forEach(function (s) {
+      s.questions.sort(function (a, b) { return (a.qnum || 0) - (b.qnum || 0); });
+    });
+    return list;
   }
 
   function el(tag, attrs, children) {
@@ -144,13 +160,36 @@
       ])
     ]));
 
-    // Mode 2: category practice
+    // Mode 2: past-exam by year (real IPA questions, exam-order)
+    var pastSets = getPastExamSets();
+    if (pastSets.length > 0) {
+      var yearSelect = el("select", {});
+      pastSets.forEach(function (s, idx) {
+        yearSelect.appendChild(el("option", {
+          value: String(idx),
+          text: s.year + "年" + s.session + "（" + s.questions.length + "問）"
+        }));
+      });
+      list.appendChild(el("div", { class: "mode-item" }, [
+        el("h3", { text: "② 年度別本番形式演習（実際の過去問）" }),
+        el("p", { text: "IPA公表の実際の過去問を、出題順のまま通しで演習します。" }),
+        el("div", { class: "mode-controls" }, [
+          yearSelect,
+          el("button", { class: "btn", onclick: function () {
+            var s = pastSets[parseInt(yearSelect.value, 10)];
+            startQuiz(s.questions.slice(), s.year + "年" + s.session + " 午前II");
+          } }, [document.createTextNode("開始")])
+        ])
+      ]));
+    }
+
+    // Mode 3: category practice
     var catSelect = el("select", {});
     getCategories().forEach(function (c) {
       catSelect.appendChild(el("option", { value: c, text: c }));
     });
     list.appendChild(el("div", { class: "mode-item" }, [
-      el("h3", { text: "② 分野別演習" }),
+      el("h3", { text: "③ 分野別演習" }),
       el("p", { text: "指定した分野の問題のみを出題します。" }),
       el("div", { class: "mode-controls" }, [
         catSelect,
@@ -168,7 +207,7 @@
       return history[q.id] && history[q.id].lastResult === false;
     });
     var weakItem = el("div", { class: "mode-item" }, [
-      el("h3", { text: "③ 苦手問題の復習" }),
+      el("h3", { text: "④ 苦手問題の復習" }),
       el("p", { text: "直近の解答で不正解だった問題（現在 " + wrongQs.length + " 問）のみを出題します。" }),
       el("div", { class: "mode-controls" }, [
         el("button", {
@@ -185,7 +224,7 @@
 
     // Mode 4: all sequential
     list.appendChild(el("div", { class: "mode-item" }, [
-      el("h3", { text: "④ 全問通し演習" }),
+      el("h3", { text: "⑤ 全問通し演習" }),
       el("p", { text: "全" + QUESTIONS.length + "問を順番に出題します（本番形式の通し演習）。" }),
       el("div", { class: "mode-controls" }, [
         el("button", { class: "btn secondary", onclick: function () {
@@ -229,7 +268,8 @@
     track.appendChild(el("div", { class: "progress-bar-fill", style: "width:" + progressPct + "%" }));
     card.appendChild(track);
 
-    card.appendChild(el("div", { class: "category-badge", text: q.category }));
+    var badgeText = q.category + (q.year ? "　|　" + q.year + "年" + q.session + " 問" + q.qnum : "");
+    card.appendChild(el("div", { class: "category-badge", text: badgeText }));
     card.appendChild(el("div", { class: "question-text", text: q.question }));
 
     var choiceList = el("div", { class: "choice-list" });
