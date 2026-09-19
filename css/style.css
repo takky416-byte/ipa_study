@@ -220,6 +220,16 @@ select, .count-select {
   white-space: pre-wrap;
 }
 
+.question-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin: 0 0 18px;
+  background: #fff;
+}
+
 .choice-list {
   display: flex;
   flex-direction: column;

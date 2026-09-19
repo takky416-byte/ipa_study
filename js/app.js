@@ -271,6 +271,9 @@
     var badgeText = q.category + (q.year ? "　|　" + q.year + "年" + q.session + " 問" + q.qnum : "");
     card.appendChild(el("div", { class: "category-badge", text: badgeText }));
     card.appendChild(el("div", { class: "question-text", text: q.question }));
+    if (q.image) {
+      card.appendChild(el("img", { class: "question-image", src: q.image, alt: "問題図" }));
+    }
 
     var choiceList = el("div", { class: "choice-list" });
     CHOICE_KEYS.forEach(function (key) {
@@ -389,11 +392,14 @@
         if (!q) return;
         var item = el("div", { class: "review-item" }, [
           el("div", { class: "category-badge", text: q.category }),
-          el("div", { class: "q-text", text: q.question }),
-          el("div", { class: "your-answer wrong", text: "あなたの解答: " + a.selected + "（" + (q.choices[a.selected] || "") + "）" }),
-          el("div", { class: "correct-answer", text: "正解: " + q.answer + "（" + q.choices[q.answer] + "）" }),
-          el("div", { class: "explanation", text: q.explanation })
+          el("div", { class: "q-text", text: q.question })
         ]);
+        if (q.image) {
+          item.appendChild(el("img", { class: "question-image", src: q.image, alt: "問題図" }));
+        }
+        item.appendChild(el("div", { class: "your-answer wrong", text: "あなたの解答: " + a.selected + "（" + (q.choices[a.selected] || "") + "）" }));
+        item.appendChild(el("div", { class: "correct-answer", text: "正解: " + q.answer + "（" + q.choices[q.answer] + "）" }));
+        item.appendChild(el("div", { class: "explanation", text: q.explanation }));
         reviewCard.appendChild(item);
       });
       app.appendChild(reviewCard);
