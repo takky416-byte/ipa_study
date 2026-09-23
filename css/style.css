@@ -284,7 +284,9 @@ select, .count-select {
 }
 .answer-feedback.correct .result-label { color: var(--color-correct); }
 .answer-feedback.wrong .result-label { color: var(--color-wrong); }
-.explanation { font-size: 0.9rem; color: #333; margin-top: 4px; }
+.explanation { font-size: 0.9rem; color: #333; margin-top: 4px; scroll-margin-top: 16px; }
+.explanation-line { margin: 0 0 8px; text-align: left; }
+.explanation-line:last-child { margin-bottom: 0; }
 
 .quiz-actions {
   margin-top: 18px;

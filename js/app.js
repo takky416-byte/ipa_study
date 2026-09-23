@@ -173,6 +173,39 @@
     while (node.firstChild) node.removeChild(node.firstChild);
   }
 
+  // Splits an explanation into paragraphs so that each "アは..." / "イは..." /
+  // "ウは..." / "エは..." choice-by-choice sentence starts on its own line.
+  function splitExplanation(text) {
+    if (!text) return [];
+    var CHOICE_STARTS = { ア: true, イ: true, ウ: true, エ: true };
+    var rawSentences = text.split("。");
+    var sentences = [];
+    rawSentences.forEach(function (s, i) {
+      if (s === "") return;
+      sentences.push(i < rawSentences.length - 1 ? s + "。" : s);
+    });
+    var paragraphs = [];
+    var current = "";
+    sentences.forEach(function (s) {
+      if (CHOICE_STARTS[s.charAt(0)] && current) {
+        paragraphs.push(current);
+        current = s;
+      } else {
+        current += s;
+      }
+    });
+    if (current) paragraphs.push(current);
+    return paragraphs.length > 0 ? paragraphs : [text];
+  }
+
+  function buildExplanation(text) {
+    var box = el("div", { class: "explanation" });
+    splitExplanation(text).forEach(function (p) {
+      box.appendChild(el("p", { class: "explanation-line", text: p }));
+    });
+    return box;
+  }
+
   // ---------- Views ----------
   function renderHome() {
     session = null;
@@ -387,7 +420,7 @@
       var isCorrect = session.selectedChoice === q.answer;
       var feedback = el("div", { class: "answer-feedback " + (isCorrect ? "correct" : "wrong") }, [
         el("div", { class: "result-label", text: isCorrect ? "正解！" : "不正解（正解: " + q.answer + "）" }),
-        el("div", { class: "explanation", text: q.explanation })
+        buildExplanation(q.explanation)
       ]);
       card.appendChild(feedback);
 
@@ -420,6 +453,10 @@
     session.answers.push({ id: q.id, category: q.category, selected: choiceKey, correct: isCorrect });
     recordAnswer(q.id, isCorrect);
     renderQuiz();
+    var explanationEl = document.querySelector(".explanation");
+    if (explanationEl) {
+      explanationEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
   function renderResult() {
@@ -533,7 +570,7 @@
         }
         item.appendChild(el("div", { class: "your-answer wrong", text: "あなたの解答: " + a.selected + "（" + (q.choices[a.selected] || "") + "）" }));
         item.appendChild(el("div", { class: "correct-answer", text: "正解: " + q.answer + "（" + q.choices[q.answer] + "）" }));
-        item.appendChild(el("div", { class: "explanation", text: q.explanation }));
+        item.appendChild(buildExplanation(q.explanation));
         reviewCard.appendChild(item);
       });
       app.appendChild(reviewCard);
