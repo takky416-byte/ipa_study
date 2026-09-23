@@ -290,6 +290,7 @@ select, .count-select {
   margin-top: 18px;
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
 }
 

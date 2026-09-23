@@ -313,13 +313,20 @@
     return list;
   }
 
-  function startQuiz(questions, title) {
+  function startQuiz(questions, title, opts) {
     if (!questions || questions.length === 0) {
       alert("対象の問題がありません。");
       return;
     }
+    opts = opts || {};
+    var round = opts.round || 1;
+    var baseTitle = opts.baseTitle || title;
     session = {
-      title: title,
+      title: round > 1 ? baseTitle + "（" + round + "周目・不正解のみ再挑戦）" : title,
+      baseTitle: baseTitle,
+      round: round,
+      allQuestions: opts.allQuestions || questions,
+      roundHistory: opts.roundHistory || [],
       questions: questions,
       index: 0,
       answers: [], // {id, selected, correct}
@@ -422,12 +429,39 @@
       appendSessionLog({ date: new Date().toISOString(), title: session.title, total: total, correct: correctCount });
     }
 
+    var wrongAnswers = answers.filter(function (a) { return !a.correct; });
+    var roundHistory = session.roundHistory.concat([{ round: session.round, total: total, correct: correctCount }]);
+    var isAllClear = session.round > 1 && wrongAnswers.length === 0;
+
     var card = el("div", { class: "card" });
     card.appendChild(el("h2", { text: session.title + " - 結果" }));
     card.appendChild(el("div", { class: "score-hero" }, [
       el("div", { class: "score-num", text: correctCount + " / " + total }),
       el("div", { class: "score-sub", text: "正答率 " + pct + "%" })
     ]));
+
+    if (isAllClear) {
+      var clearBox = el("div", { class: "answer-feedback correct all-clear" }, [
+        el("div", { class: "result-label", text: "全問正解しました！お疲れさまでした。" }),
+        el("div", { class: "explanation", text: session.round + "周目で、不正解だった問題をすべて解き直して正解できました。" })
+      ]);
+      card.appendChild(clearBox);
+
+      var historyTable = el("table", { class: "breakdown" });
+      historyTable.appendChild(el("tr", {}, [
+        el("th", { text: "周" }),
+        el("th", { text: "出題数" }),
+        el("th", { text: "正答数" })
+      ]));
+      roundHistory.forEach(function (r) {
+        historyTable.appendChild(el("tr", {}, [
+          el("td", { text: r.round + "周目" }),
+          el("td", { text: r.total + "問" }),
+          el("td", { text: r.correct + "問" })
+        ]));
+      });
+      card.appendChild(historyTable);
+    }
 
     // category breakdown
     var byCat = {};
@@ -456,15 +490,30 @@
 
     var actions = el("div", { class: "quiz-actions" });
     actions.appendChild(el("button", { class: "btn secondary", onclick: renderHome }, [document.createTextNode("ホームに戻る")]));
-    actions.appendChild(el("button", { class: "btn", onclick: function () {
-      startQuiz(shuffle(session.questions.slice()), session.title);
-    } }, [document.createTextNode("同条件でもう一度")]));
+    if (wrongAnswers.length > 0) {
+      actions.appendChild(el("button", {
+        class: "btn",
+        onclick: function () {
+          var wrongQuestions = wrongAnswers
+            .map(function (a) { return QUESTIONS.filter(function (qq) { return qq.id === a.id; })[0]; })
+            .filter(Boolean);
+          startQuiz(shuffle(wrongQuestions), session.baseTitle, {
+            round: session.round + 1,
+            baseTitle: session.baseTitle,
+            allQuestions: session.allQuestions,
+            roundHistory: roundHistory
+          });
+        }
+      }, [document.createTextNode("間違えた問題だけを再挑戦（" + wrongAnswers.length + "問）")]));
+    }
+    actions.appendChild(el("button", { class: "btn" + (wrongAnswers.length > 0 ? " secondary" : "") , onclick: function () {
+      startQuiz(shuffle(session.allQuestions.slice()), session.baseTitle);
+    } }, [document.createTextNode("最初からもう一度（全" + session.allQuestions.length + "問）")]));
     card.appendChild(actions);
 
     app.appendChild(card);
 
     // wrong review
-    var wrongAnswers = answers.filter(function (a) { return !a.correct; });
     if (wrongAnswers.length > 0) {
       var reviewCard = el("div", { class: "card" });
       reviewCard.appendChild(el("h2", { text: "間違えた問題の復習（" + wrongAnswers.length + "問）" }));
