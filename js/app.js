@@ -342,6 +342,10 @@
     var total = session.questions.length;
     var progressPct = Math.round((session.index / total) * 100);
 
+    if (!session.answered) {
+      window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+    }
+
     var card = el("div", { class: "card" });
 
     card.appendChild(el("div", { class: "quiz-progress" }, [
