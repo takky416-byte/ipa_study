@@ -8,6 +8,11 @@
   var HEATMAP_DAYS = 84;
   var CHOICE_KEYS = ["ア", "イ", "ウ", "エ"];
 
+  var SYNC_TOKEN_KEY = "itsmSyncToken_v1";
+  var SYNC_GIST_ID_KEY = "itsmSyncGistId_v1";
+  var SYNC_LAST_AT_KEY = "itsmSyncLastAt_v1";
+  var SYNC_FILENAME = "itsm-study-sync.json";
+
   var MASTERY_LABELS = { unseen: "未学習", weak: "要復習", learning: "学習中", mastered: "習得済み" };
 
   var app = document.getElementById("app");
@@ -71,8 +76,13 @@
     }
   }
 
+  function makeId() {
+    return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+  }
+
   function appendSessionLog(entry) {
     var log = loadSessionLog();
+    entry.id = entry.id || makeId();
     log.push(entry);
     if (log.length > MAX_SESSION_LOG) log = log.slice(log.length - MAX_SESSION_LOG);
     saveSessionLog(log);
@@ -80,6 +90,124 @@
 
   function resetSessionLog() {
     localStorage.removeItem(SESSION_LOG_KEY);
+  }
+
+  // ---------- Merge (used when syncing history/log between devices) ----------
+  // Merging never lets a question regress from "mastered" back to "not mastered":
+  // for each question, whichever side has the LATER lastAt timestamp decides
+  // lastResult, and shown/correct counts only ever grow (max, never overwritten
+  // down), so an older sync can never undo a newer "learned" result.
+  function mergeHistoryMaps(a, b) {
+    a = a || {}; b = b || {};
+    var merged = {};
+    Object.keys(a).concat(Object.keys(b)).forEach(function (id) {
+      if (merged[id]) return;
+      var la = a[id], ra = b[id];
+      if (la && !ra) { merged[id] = la; return; }
+      if (ra && !la) { merged[id] = ra; return; }
+      if (!la && !ra) return;
+      var laTime = la.lastAt ? Date.parse(la.lastAt) : 0;
+      var raTime = ra.lastAt ? Date.parse(ra.lastAt) : 0;
+      var newer = raTime > laTime ? ra : la;
+      merged[id] = {
+        shown: Math.max(la.shown || 0, ra.shown || 0),
+        correct: Math.max(la.correct || 0, ra.correct || 0),
+        lastResult: newer.lastResult,
+        lastAt: newer.lastAt
+      };
+    });
+    return merged;
+  }
+
+  function mergeSessionLogs(a, b) {
+    var byId = {};
+    (a || []).concat(b || []).forEach(function (e) {
+      var id = e.id || makeId();
+      byId[id] = byId[id] || e;
+    });
+    var merged = Object.keys(byId).map(function (id) { return byId[id]; });
+    merged.sort(function (x, y) { return Date.parse(x.date) - Date.parse(y.date); });
+    if (merged.length > MAX_SESSION_LOG) merged = merged.slice(merged.length - MAX_SESSION_LOG);
+    return merged;
+  }
+
+  // ---------- Cross-device sync (private GitHub Gist owned by the user) ----------
+  function getSyncToken() { try { return localStorage.getItem(SYNC_TOKEN_KEY) || ""; } catch (e) { return ""; } }
+  function setSyncToken(t) { try { localStorage.setItem(SYNC_TOKEN_KEY, t); } catch (e) {} }
+  function getSyncGistId() { try { return localStorage.getItem(SYNC_GIST_ID_KEY) || ""; } catch (e) { return ""; } }
+  function setSyncGistId(id) { try { localStorage.setItem(SYNC_GIST_ID_KEY, id); } catch (e) {} }
+  function getSyncLastAt() { try { return localStorage.getItem(SYNC_LAST_AT_KEY) || ""; } catch (e) { return ""; } }
+  function setSyncLastAt(iso) { try { localStorage.setItem(SYNC_LAST_AT_KEY, iso); } catch (e) {} }
+  function clearSyncConfig() {
+    try {
+      localStorage.removeItem(SYNC_TOKEN_KEY);
+      localStorage.removeItem(SYNC_GIST_ID_KEY);
+      localStorage.removeItem(SYNC_LAST_AT_KEY);
+    } catch (e) {}
+  }
+  function isSyncConfigured() { return !!(getSyncToken() && getSyncGistId()); }
+
+  function ghHeaders(token, withContentType) {
+    var h = { "Authorization": "token " + token, "Accept": "application/vnd.github+json" };
+    if (withContentType) h["Content-Type"] = "application/json";
+    return h;
+  }
+
+  function createSyncGist(token) {
+    var payload = { history: loadHistory(), sessionLog: loadSessionLog(), updatedAt: new Date().toISOString() };
+    var files = {};
+    files[SYNC_FILENAME] = { content: JSON.stringify(payload) };
+    return fetch("https://api.github.com/gists", {
+      method: "POST",
+      headers: ghHeaders(token, true),
+      body: JSON.stringify({
+        description: "ITサービスマネージャ試験 演習アプリ 学習履歴（同期用・自動生成。手動で編集しないでください）",
+        public: false,
+        files: files
+      })
+    }).then(function (res) {
+      if (!res.ok) throw new Error("Gistの作成に失敗しました（status " + res.status + "）。トークンの権限（gistスコープ）を確認してください。");
+      return res.json();
+    }).then(function (gist) { return gist.id; });
+  }
+
+  function performSync() {
+    var token = getSyncToken();
+    var gistId = getSyncGistId();
+    if (!token || !gistId) return Promise.resolve({ ok: false, reason: "not-configured" });
+
+    return fetch("https://api.github.com/gists/" + gistId, { headers: ghHeaders(token, false) })
+      .then(function (res) {
+        if (!res.ok) throw new Error("Gistの取得に失敗しました（status " + res.status + "）。トークンやGist IDを確認してください。");
+        return res.json();
+      })
+      .then(function (gist) {
+        var remote = { history: {}, sessionLog: [] };
+        var file = gist.files && gist.files[SYNC_FILENAME];
+        if (file && file.content) {
+          try { remote = JSON.parse(file.content); } catch (e) { /* ignore malformed remote data */ }
+        }
+        var mergedHistory = mergeHistoryMaps(loadHistory(), remote.history || {});
+        var mergedLog = mergeSessionLogs(loadSessionLog(), remote.sessionLog || []);
+        saveHistory(mergedHistory);
+        saveSessionLog(mergedLog);
+
+        var files = {};
+        files[SYNC_FILENAME] = { content: JSON.stringify({ history: mergedHistory, sessionLog: mergedLog, updatedAt: new Date().toISOString() }) };
+        return fetch("https://api.github.com/gists/" + gistId, {
+          method: "PATCH",
+          headers: ghHeaders(token, true),
+          body: JSON.stringify({ files: files })
+        });
+      })
+      .then(function (res) {
+        if (!res.ok) throw new Error("Gistへの書き込みに失敗しました（status " + res.status + "）。");
+        setSyncLastAt(new Date().toISOString());
+        return { ok: true };
+      })
+      .catch(function (err) {
+        return { ok: false, reason: err.message || String(err) };
+      });
   }
 
   function computeStudyStats(log) {
@@ -468,6 +596,7 @@
 
     if (total > 0) {
       appendSessionLog({ date: new Date().toISOString(), title: session.title, total: total, correct: correctCount });
+      if (isSyncConfigured()) performSync();
     }
 
     var wrongAnswers = answers.filter(function (a) { return !a.correct; });
@@ -590,6 +719,117 @@
     return row;
   }
 
+  function formatSyncDate(iso) {
+    if (!iso) return "まだ同期していません";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate() + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+  }
+
+  function buildSyncCard() {
+    var card = el("div", { class: "card" });
+    card.appendChild(el("h2", { text: "端末間の同期（任意）" }));
+    card.appendChild(el("p", { text: "自分のGitHubアカウントの非公開Gistを経由して、学習履歴を他の端末と共有できます。トークンはこの端末のブラウザ内にのみ保存され、外部には送信されません（GitHub以外には送信しません）。同期のたびに双方のデータを比較し、より新しい・より進んだ方の記録を採用するため、同期によって「習得済み」が「未学習」に戻ることはありません。" }));
+
+    var status = el("div", { class: "sync-status" });
+
+    if (isSyncConfigured()) {
+      var gistId = getSyncGistId();
+      card.appendChild(el("div", { class: "summary-grid" }, [
+        summaryStat("接続中", "同期の状態"),
+        summaryStat(formatSyncDate(getSyncLastAt()), "最終同期")
+      ]));
+      card.appendChild(el("p", {}, [
+        document.createTextNode("この端末のGist ID（他の端末をつなげる時に使います）: ")
+      ]));
+      var idBox = el("input", { class: "sync-id-box", value: gistId, readonly: "readonly" });
+      idBox.addEventListener("focus", function () { idBox.select(); });
+      card.appendChild(idBox);
+
+      var actions = el("div", { class: "quiz-actions" });
+      var syncBtn = el("button", { class: "btn", onclick: function () {
+        syncBtn.disabled = true;
+        syncBtn.textContent = "同期中…";
+        performSync().then(function (result) {
+          if (result.ok) {
+            renderAchievement();
+          } else {
+            syncBtn.disabled = false;
+            syncBtn.textContent = "今すぐ同期";
+            status.textContent = "同期に失敗しました: " + result.reason;
+          }
+        });
+      } }, [document.createTextNode("今すぐ同期")]);
+      actions.appendChild(syncBtn);
+      actions.appendChild(el("button", { class: "btn secondary", onclick: function () {
+        if (confirm("この端末の同期設定を解除しますか？（Gist自体は削除されず、記録も消えません）")) {
+          clearSyncConfig();
+          renderAchievement();
+        }
+      } }, [document.createTextNode("この端末の同期を解除")]));
+      card.appendChild(actions);
+      card.appendChild(status);
+      return card;
+    }
+
+    // --- setup form (not yet configured) ---
+    var tokenInput = el("input", { type: "password", class: "sync-input", placeholder: "GitHubトークン（gistスコープ）" });
+    card.appendChild(el("p", {}, [document.createTextNode("GitHubの ")]));
+    var tokenLink = el("a", { href: "https://github.com/settings/tokens/new?scopes=gist&description=ITSM%20study%20sync", target: "_blank", rel: "noopener", text: "個人アクセストークン発行ページ" });
+    var tokenPara = el("p", {}, [
+      document.createTextNode("① "),
+      tokenLink,
+      document.createTextNode(" で「gist」権限のみのトークンを発行し、下に貼り付けてください（repoなど他の権限は不要です）。")
+    ]);
+    card.appendChild(tokenPara);
+    card.appendChild(tokenInput);
+
+    var startBtn = el("button", { class: "btn", onclick: function () {
+      var token = tokenInput.value.trim();
+      if (!token) { status.textContent = "トークンを入力してください。"; return; }
+      startBtn.disabled = true;
+      startBtn.textContent = "作成中…";
+      createSyncGist(token).then(function (gistId) {
+        setSyncToken(token);
+        setSyncGistId(gistId);
+        setSyncLastAt(new Date().toISOString());
+        renderAchievement();
+      }).catch(function (err) {
+        startBtn.disabled = false;
+        startBtn.textContent = "この端末を基準に同期を開始";
+        status.textContent = err.message || String(err);
+      });
+    } }, [document.createTextNode("この端末を基準に同期を開始")]);
+    card.appendChild(startBtn);
+
+    card.appendChild(el("p", { text: "② 他の端末で既に同期を開始している場合は、そちらの「達成度」画面に表示されているGist IDを下に入力し、同じgist権限のトークンで接続してください。" }));
+    var gistIdInput = el("input", { class: "sync-input", placeholder: "接続先のGist ID" });
+    card.appendChild(gistIdInput);
+    var connectBtn = el("button", { class: "btn secondary", onclick: function () {
+      var token = tokenInput.value.trim();
+      var gistId = gistIdInput.value.trim();
+      if (!token || !gistId) { status.textContent = "トークンとGist IDの両方を入力してください。"; return; }
+      connectBtn.disabled = true;
+      connectBtn.textContent = "接続中…";
+      setSyncToken(token);
+      setSyncGistId(gistId);
+      performSync().then(function (result) {
+        if (result.ok) {
+          renderAchievement();
+        } else {
+          clearSyncConfig();
+          connectBtn.disabled = false;
+          connectBtn.textContent = "既存のGistに接続する";
+          status.textContent = "接続に失敗しました: " + result.reason;
+        }
+      });
+    } }, [document.createTextNode("既存のGistに接続する")]);
+    card.appendChild(connectBtn);
+
+    card.appendChild(status);
+    return card;
+  }
+
   function renderAchievement() {
     session = null;
     clear(app);
@@ -618,8 +858,9 @@
 
     if (counts.mastered + counts.learning + counts.weak === 0) {
       var emptyCard = el("div", { class: "card" });
-      emptyCard.appendChild(el("div", { class: "empty-state", text: "まだ演習履歴がありません。ホームから演習を始めましょう。" }));
+      emptyCard.appendChild(el("div", { class: "empty-state", text: "まだ演習履歴がありません。ホームから演習を始めましょう。他の端末で演習済みの場合は、下記の「端末間の同期」で記録を呼び戻せます。" }));
       app.appendChild(emptyCard);
+      app.appendChild(buildSyncCard());
       return;
     }
 
@@ -649,6 +890,8 @@
       });
       app.appendChild(yearCard);
     }
+
+    app.appendChild(buildSyncCard());
 
     // reset
     var resetCard = el("div", { class: "card" });
@@ -741,4 +984,5 @@
 
   // ---------- Init ----------
   renderHome();
+  if (isSyncConfigured()) performSync();
 })();
