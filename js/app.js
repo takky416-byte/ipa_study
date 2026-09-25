@@ -802,13 +802,33 @@
     } }, [document.createTextNode("この端末を基準に同期を開始")]);
     card.appendChild(startBtn);
 
-    card.appendChild(el("p", { text: "② 他の端末で既に同期を開始している場合は、そちらの「達成度」画面に表示されているGist IDを下に入力し、同じgist権限のトークンで接続してください。" }));
+    card.appendChild(el("p", { text: "② 他の端末で既に同期を開始している場合は、上の欄に①と同じ手順で発行したトークンを入力したうえで、そちらの「達成度」画面に表示されているGist IDを下に入力し、接続してください（上のトークン欄とこのGist IDの欄、両方の入力が必要です）。" }));
     var gistIdInput = el("input", { class: "sync-input", placeholder: "接続先のGist ID" });
     card.appendChild(gistIdInput);
     var connectBtn = el("button", { class: "btn secondary", onclick: function () {
       var token = tokenInput.value.trim();
       var gistId = gistIdInput.value.trim();
-      if (!token || !gistId) { status.textContent = "トークンとGist IDの両方を入力してください。"; return; }
+      tokenInput.classList.remove("input-error");
+      gistIdInput.classList.remove("input-error");
+      if (!token && !gistId) {
+        status.textContent = "上のトークン欄とGist IDの欄の両方が空欄です。両方入力してください。";
+        tokenInput.classList.add("input-error");
+        gistIdInput.classList.add("input-error");
+        tokenInput.focus();
+        return;
+      }
+      if (!token) {
+        status.textContent = "上の「GitHubトークン（gistスコープ）」欄が空欄です。①の手順でトークンを発行して入力してください。";
+        tokenInput.classList.add("input-error");
+        tokenInput.focus();
+        return;
+      }
+      if (!gistId) {
+        status.textContent = "Gist IDが空欄です。接続したい端末の「達成度」画面に表示されているGist IDを入力してください。";
+        gistIdInput.classList.add("input-error");
+        gistIdInput.focus();
+        return;
+      }
       connectBtn.disabled = true;
       connectBtn.textContent = "接続中…";
       setSyncToken(token);
