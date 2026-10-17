@@ -1023,11 +1023,18 @@
     var pastSets = getPastExamSets();
     if (pastSets.length > 0) {
       var yearCard = el("div", { class: "card" });
-      yearCard.appendChild(el("h2", { text: "年度別の達成度（実際の過去問）" }));
+      yearCard.appendChild(el("h2", { text: "年度別・出題元別の達成度" }));
       pastSets.forEach(function (s) {
         var mastered = s.questions.filter(function (q) { return getMastery(history[q.id]) === "mastered"; }).length;
         yearCard.appendChild(progressRow(s.year + "年" + s.session, mastered, s.questions.length));
       });
+      // Questions that do not belong to any exam year (the original practice set)
+      // would otherwise be missing from this card and make the totals look wrong.
+      var originals = QUESTIONS.filter(function (q) { return !q.year; });
+      if (originals.length > 0) {
+        var originalsMastered = originals.filter(function (q) { return getMastery(history[q.id]) === "mastered"; }).length;
+        yearCard.appendChild(progressRow("オリジナル演習問題（過去問以外）", originalsMastered, originals.length));
+      }
       app.appendChild(yearCard);
     }
 
