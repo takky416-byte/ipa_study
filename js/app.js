@@ -18,6 +18,7 @@
 
   var app = document.getElementById("app");
   var session = null; // current quiz session state
+  var currentView = "home"; // home | quiz | result | achievement | history
 
   // ---------- History (localStorage) ----------
   function loadHistory() {
@@ -46,6 +47,7 @@
     entry.lastAt = new Date().toISOString();
     history[questionId] = entry;
     saveHistory(history);
+    scheduleSync();
   }
 
   function resetHistory() {
@@ -224,7 +226,8 @@
     ]));
   }
 
-  function performSync() {
+  function doSync() {
+    var changed = false;
     var token = getSyncToken();
     var gistId = getSyncGistId();
     if (!token || !gistId) return Promise.resolve({ ok: false, reason: "not-configured" });
@@ -240,8 +243,12 @@
         if (file && file.content) {
           try { remote = JSON.parse(file.content); } catch (e) { /* ignore malformed remote data */ }
         }
-        var mergedHistory = mergeHistoryMaps(loadHistory(), remote.history || {});
-        var mergedLog = mergeSessionLogs(loadSessionLog(), remote.sessionLog || []);
+        var localHistory = loadHistory();
+        var localLog = loadSessionLog();
+        var mergedHistory = mergeHistoryMaps(localHistory, remote.history || {});
+        var mergedLog = mergeSessionLogs(localLog, remote.sessionLog || []);
+        changed = JSON.stringify(mergedHistory) !== JSON.stringify(localHistory) ||
+                  JSON.stringify(mergedLog) !== JSON.stringify(localLog);
         saveHistory(mergedHistory);
         saveSessionLog(mergedLog);
 
@@ -258,6 +265,7 @@
         setSyncLastAt(new Date().toISOString());
         setSyncError("");
         updateSyncBanner();
+        if (changed) refreshViewAfterSync();
         return { ok: true };
       })
       .catch(function (err) {
@@ -266,6 +274,47 @@
         updateSyncBanner();
         return { ok: false, reason: reason };
       });
+  }
+
+  // Only one sync runs at a time; a request made while one is running is
+  // queued and runs once more afterwards, so late answers are never skipped
+  // and two syncs can never overwrite each other's upload.
+  var syncInFlight = null;
+  var syncQueued = false;
+  function performSync() {
+    if (syncInFlight) { syncQueued = true; return syncInFlight; }
+    syncInFlight = doSync().then(function (result) {
+      syncInFlight = null;
+      if (syncQueued) { syncQueued = false; performSync(); }
+      return result;
+    });
+    return syncInFlight;
+  }
+
+  // Sync a few seconds after the last answer so progress reaches the other
+  // device even if the quiz is abandoned halfway.
+  var syncTimer = null;
+  function scheduleSync() {
+    if (!isSyncConfigured()) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () { performSync(); }, 4000);
+  }
+
+  // After a sync pulled in new data, redraw the passive screens (home summary,
+  // achievement, history) so they never show stale numbers. A quiz in progress
+  // or a form being typed into is left alone.
+  function refreshViewAfterSync() {
+    var ae = document.activeElement;
+    if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) return;
+    var render = { home: renderHome, achievement: renderAchievement, history: renderHistory }[currentView];
+    if (!render) return;
+    var selects = Array.prototype.map.call(app.querySelectorAll("select"), function (sel) { return sel.value; });
+    var y = window.scrollY;
+    render();
+    Array.prototype.forEach.call(app.querySelectorAll("select"), function (sel, i) {
+      if (selects[i] !== undefined && Array.prototype.some.call(sel.options, function (o) { return o.value === selects[i]; })) sel.value = selects[i];
+    });
+    window.scrollTo(0, y);
   }
 
   function computeStudyStats(log) {
@@ -394,6 +443,7 @@
 
   // ---------- Views ----------
   function renderHome() {
+    currentView = "home";
     session = null;
     clear(app);
 
@@ -556,6 +606,7 @@
   }
 
   function renderQuiz() {
+    currentView = "quiz";
     clear(app);
     var q = session.questions[session.index];
     var total = session.questions.length;
@@ -646,6 +697,7 @@
   }
 
   function renderResult() {
+    currentView = "result";
     clear(app);
     var answers = session.answers;
     var total = answers.length;
@@ -918,6 +970,7 @@
   }
 
   function renderAchievement() {
+    currentView = "achievement";
     session = null;
     clear(app);
     var history = loadHistory();
@@ -995,6 +1048,7 @@
   }
 
   function renderHistory() {
+    currentView = "history";
     session = null;
     clear(app);
     var log = loadSessionLog();
@@ -1098,4 +1152,14 @@
     if (isSyncConfigured()) performSync();
   }
   updateSyncBanner();
+
+  // Phones keep the page alive in the background; when the user comes back,
+  // pull whatever the other device did in the meantime (at most once per 15s).
+  var lastForegroundSync = 0;
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState !== "visible" || !isSyncConfigured()) return;
+    if (Date.now() - lastForegroundSync < 15000) return;
+    lastForegroundSync = Date.now();
+    performSync();
+  });
 })();
