@@ -11,6 +11,7 @@
   var SYNC_TOKEN_KEY = "itsmSyncToken_v1";
   var SYNC_GIST_ID_KEY = "itsmSyncGistId_v1";
   var SYNC_LAST_AT_KEY = "itsmSyncLastAt_v1";
+  var SYNC_ERROR_KEY = "itsmSyncError_v1";
   var SYNC_FILENAME = "itsm-study-sync.json";
 
   var MASTERY_LABELS = { unseen: "未学習", weak: "要復習", learning: "学習中", mastered: "習得済み" };
@@ -143,9 +144,48 @@
       localStorage.removeItem(SYNC_TOKEN_KEY);
       localStorage.removeItem(SYNC_GIST_ID_KEY);
       localStorage.removeItem(SYNC_LAST_AT_KEY);
+      localStorage.removeItem(SYNC_ERROR_KEY);
+    } catch (e) {}
+  }
+  function getSyncError() { try { return localStorage.getItem(SYNC_ERROR_KEY) || ""; } catch (e) { return ""; } }
+  function setSyncError(msg) {
+    try {
+      if (msg) localStorage.setItem(SYNC_ERROR_KEY, msg);
+      else localStorage.removeItem(SYNC_ERROR_KEY);
     } catch (e) {}
   }
   function isSyncConfigured() { return !!(getSyncToken() && getSyncGistId()); }
+
+  // The whole sync setup (token + gist id) is packed into one URL fragment so a
+  // second device only has to open the link: no GitHub login or token typing.
+  // The fragment is never sent to any server, and is stripped from the address
+  // bar right after it has been imported.
+  function buildSyncLink() {
+    var packed = JSON.stringify({ t: getSyncToken(), g: getSyncGistId() });
+    var b64 = btoa(packed).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return location.href.split("#")[0] + "#sync=" + b64;
+  }
+
+  function parseSyncLinkHash(hash) {
+    var m = /^#sync=([A-Za-z0-9_-]+)$/.exec(hash || "");
+    if (!m) return null;
+    try {
+      var b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
+      while (b64.length % 4) b64 += "=";
+      var obj = JSON.parse(atob(b64));
+      if (obj && typeof obj.t === "string" && typeof obj.g === "string" && obj.t && /^[0-9a-f]+$/i.test(obj.g)) {
+        return { token: obj.t, gistId: obj.g };
+      }
+    } catch (e) { /* fall through */ }
+    return null;
+  }
+
+  function syncHttpErrorMessage(what, status) {
+    if (status === 401 || status === 403) {
+      return what + "に失敗しました（status " + status + "）。トークンの有効期限が切れているか、権限がありません。「トークンを更新する」から新しいトークンを入力してください。";
+    }
+    return what + "に失敗しました（status " + status + "）。";
+  }
 
   function ghHeaders(token, withContentType) {
     var h = { "Authorization": "token " + token, "Accept": "application/vnd.github+json" };
@@ -171,6 +211,19 @@
     }).then(function (gist) { return gist.id; });
   }
 
+  // Shows a small warning on every screen while the last sync failed
+  // (e.g. the token expired), so failures never go unnoticed.
+  function updateSyncBanner() {
+    var box = document.getElementById("syncBanner");
+    if (!box) return;
+    clear(box);
+    if (!isSyncConfigured() || !getSyncError()) return;
+    box.appendChild(el("div", { class: "sync-banner" }, [
+      el("span", { text: "学習履歴の同期に失敗しています。" }),
+      el("button", { class: "btn small secondary", onclick: function () { renderAchievement(); } }, [document.createTextNode("詳細を見る")])
+    ]));
+  }
+
   function performSync() {
     var token = getSyncToken();
     var gistId = getSyncGistId();
@@ -178,7 +231,7 @@
 
     return fetch("https://api.github.com/gists/" + gistId, { headers: ghHeaders(token, false) })
       .then(function (res) {
-        if (!res.ok) throw new Error("Gistの取得に失敗しました（status " + res.status + "）。トークンやGist IDを確認してください。");
+        if (!res.ok) throw new Error(syncHttpErrorMessage("Gistの取得", res.status));
         return res.json();
       })
       .then(function (gist) {
@@ -201,12 +254,17 @@
         });
       })
       .then(function (res) {
-        if (!res.ok) throw new Error("Gistへの書き込みに失敗しました（status " + res.status + "）。");
+        if (!res.ok) throw new Error(syncHttpErrorMessage("Gistへの書き込み", res.status));
         setSyncLastAt(new Date().toISOString());
+        setSyncError("");
+        updateSyncBanner();
         return { ok: true };
       })
       .catch(function (err) {
-        return { ok: false, reason: err.message || String(err) };
+        var reason = err.message || String(err);
+        setSyncError(reason);
+        updateSyncBanner();
+        return { ok: false, reason: reason };
       });
   }
 
@@ -726,126 +784,135 @@
     return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate() + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
   }
 
-  function buildSyncCard() {
-    var card = el("div", { class: "card" });
-    card.appendChild(el("h2", { text: "端末間の同期（任意）" }));
-    card.appendChild(el("p", { text: "自分のGitHubアカウントの非公開Gistを経由して、学習履歴を他の端末と共有できます。トークンはこの端末のブラウザ内にのみ保存され、外部には送信されません（GitHub以外には送信しません）。同期のたびに双方のデータを比較し、より新しい・より進んだ方の記録を採用するため、同期によって「習得済み」が「未学習」に戻ることはありません。" }));
+  function pad2(n) { return ("0" + n).slice(-2); }
 
+  function tokenIssueUrl() {
+    var d = new Date();
+    var stamp = d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + "-" + pad2(d.getHours()) + pad2(d.getMinutes());
+    return "https://github.com/settings/tokens/new?scopes=gist&default_expires_at=none&description=" +
+      encodeURIComponent("ITSM study sync " + stamp);
+  }
+
+  function copyFromInput(input, onDone) {
+    function fallback() {
+      input.focus();
+      input.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { /* ignore */ }
+      onDone(ok);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(input.value).then(function () { onDone(true); }, fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  function buildSyncCard() {
+    var card = el("div", { class: "card", id: "syncCard" });
+    card.appendChild(el("h2", { text: "端末間の同期（任意）" }));
     var status = el("div", { class: "sync-status" });
 
     if (isSyncConfigured()) {
-      var gistId = getSyncGistId();
+      card.appendChild(el("p", { text: "同期のたびに双方の記録を比較し、より新しい・より進んだ方を採用するため、「習得済み」が「未学習」に戻ることはありません。演習を1セット終えるたびに自動で同期されます。" }));
       card.appendChild(el("div", { class: "summary-grid" }, [
         summaryStat("接続中", "同期の状態"),
-        summaryStat(formatSyncDate(getSyncLastAt()), "最終同期")
+        summaryStat(getSyncLastAt() ? formatSyncDate(getSyncLastAt()) : "—", "最終同期")
       ]));
-      card.appendChild(el("p", {}, [
-        document.createTextNode("この端末のGist ID（他の端末をつなげる時に使います）: ")
-      ]));
-      var idBox = el("input", { class: "sync-id-box", value: gistId, readonly: "readonly" });
-      idBox.addEventListener("focus", function () { idBox.select(); });
-      card.appendChild(idBox);
+      if (getSyncError()) status.textContent = "前回の同期に失敗しました: " + getSyncError();
+
+      card.appendChild(el("h3", { text: "他の端末をつなぐ" }));
+      card.appendChild(el("p", { text: "つなぎたい端末で下のリンクを開くだけで、同じ学習履歴に接続されます（GitHubのログインもトークンの入力も不要です）。自分宛てのメッセージやメモアプリなどで送ってください。" }));
+      var linkBox = el("input", { class: "sync-id-box", value: buildSyncLink(), readonly: "readonly" });
+      linkBox.addEventListener("focus", function () { linkBox.select(); });
+      card.appendChild(linkBox);
+      var copyBtn = el("button", { class: "btn", onclick: function () {
+        copyFromInput(linkBox, function (ok) {
+          copyBtn.textContent = ok ? "コピーしました" : "コピーできません。リンクを長押しでコピーしてください";
+          setTimeout(function () { copyBtn.textContent = "リンクをコピー"; }, 2500);
+        });
+      } }, [document.createTextNode("リンクをコピー")]);
+      card.appendChild(copyBtn);
+      card.appendChild(el("p", { class: "sync-note", text: "このリンクにはこのアプリの同期用の鍵が含まれています。パスワードと同じ扱いで、他の人には共有しないでください。" }));
 
       var actions = el("div", { class: "quiz-actions" });
       var syncBtn = el("button", { class: "btn", onclick: function () {
         syncBtn.disabled = true;
         syncBtn.textContent = "同期中…";
-        performSync().then(function (result) {
-          if (result.ok) {
-            renderAchievement();
-          } else {
-            syncBtn.disabled = false;
-            syncBtn.textContent = "今すぐ同期";
-            status.textContent = "同期に失敗しました: " + result.reason;
-          }
-        });
+        performSync().then(function () { renderAchievement(); });
       } }, [document.createTextNode("今すぐ同期")]);
       actions.appendChild(syncBtn);
       actions.appendChild(el("button", { class: "btn secondary", onclick: function () {
-        if (confirm("この端末の同期設定を解除しますか？（Gist自体は削除されず、記録も消えません）")) {
+        if (confirm("この端末の同期設定を解除しますか？（Gist自体は削除されず、この端末の記録も消えません）")) {
           clearSyncConfig();
+          updateSyncBanner();
           renderAchievement();
         }
       } }, [document.createTextNode("この端末の同期を解除")]));
       card.appendChild(actions);
       card.appendChild(status);
+
+      var details = el("details", { class: "sync-details" });
+      details.appendChild(el("summary", { text: "トークンを更新する（有効期限が切れた時など）" }));
+      details.appendChild(el("p", {}, [
+        el("a", { href: tokenIssueUrl(), target: "_blank", rel: "noopener", text: "トークン発行ページ" }),
+        document.createTextNode(" で新しいトークンを発行（有効期限は「No expiration」を選択）し、下に貼り付けてください。更新すると、上の「他の端末をつなぐ」リンクも新しい内容に変わります。")
+      ]));
+      var newToken = el("input", { type: "password", class: "sync-input", placeholder: "新しいGitHubトークン" });
+      details.appendChild(newToken);
+      var updateBtn = el("button", { class: "btn secondary", onclick: function () {
+        var t = newToken.value.trim();
+        if (!t) { status.textContent = "新しいトークンを入力してください。"; newToken.classList.add("input-error"); return; }
+        var oldToken = getSyncToken();
+        updateBtn.disabled = true;
+        updateBtn.textContent = "確認中…";
+        setSyncToken(t);
+        performSync().then(function (result) {
+          if (result.ok) {
+            renderAchievement();
+          } else {
+            setSyncToken(oldToken);
+            updateBtn.disabled = false;
+            updateBtn.textContent = "トークンを更新";
+            status.textContent = "更新に失敗しました: " + result.reason;
+          }
+        });
+      } }, [document.createTextNode("トークンを更新")]);
+      details.appendChild(updateBtn);
+      card.appendChild(details);
       return card;
     }
 
-    // --- setup form (not yet configured) ---
-    var tokenInput = el("input", { type: "password", class: "sync-input", placeholder: "GitHubトークン（gistスコープ）" });
-    card.appendChild(el("p", {}, [document.createTextNode("GitHubの ")]));
-    var tokenLink = el("a", { href: "https://github.com/settings/tokens/new?scopes=gist&description=ITSM%20study%20sync", target: "_blank", rel: "noopener", text: "個人アクセストークン発行ページ" });
-    var tokenPara = el("p", {}, [
+    // --- first-device setup (one time only) ---
+    card.appendChild(el("p", { text: "自分のGitHubアカウントの非公開Gistを経由して、学習履歴を端末間で共有できます。最初の1台だけ、下の手順でトークンを発行して貼り付けます。2台目以降は、1台目に表示される「接続リンク」を開くだけです。" }));
+    card.appendChild(el("p", {}, [
       document.createTextNode("① "),
-      tokenLink,
-      document.createTextNode(" で「gist」権限のみのトークンを発行し、下に貼り付けてください（repoなど他の権限は不要です）。")
-    ]);
-    card.appendChild(tokenPara);
+      el("a", { href: tokenIssueUrl(), target: "_blank", rel: "noopener", text: "トークン発行ページ" }),
+      document.createTextNode(" を開き、いちばん下の緑の「Generate token」を押して、表示されたトークン（ghp_で始まる文字列）をコピーします。権限は「gist」だけが選ばれた状態になっています。有効期限は「No expiration」になっていることを確認してください。")
+    ]));
+    var tokenInput = el("input", { type: "password", class: "sync-input", placeholder: "コピーしたトークンを貼り付け" });
+    card.appendChild(el("p", { text: "② コピーしたトークンを下に貼り付けて、開始ボタンを押します。" }));
     card.appendChild(tokenInput);
-
     var startBtn = el("button", { class: "btn", onclick: function () {
       var token = tokenInput.value.trim();
-      if (!token) { status.textContent = "トークンを入力してください。"; return; }
+      tokenInput.classList.remove("input-error");
+      if (!token) { status.textContent = "トークンを入力してください。"; tokenInput.classList.add("input-error"); tokenInput.focus(); return; }
       startBtn.disabled = true;
       startBtn.textContent = "作成中…";
       createSyncGist(token).then(function (gistId) {
         setSyncToken(token);
         setSyncGistId(gistId);
         setSyncLastAt(new Date().toISOString());
+        setSyncError("");
         renderAchievement();
       }).catch(function (err) {
         startBtn.disabled = false;
-        startBtn.textContent = "この端末を基準に同期を開始";
+        startBtn.textContent = "同期を開始";
         status.textContent = err.message || String(err);
       });
-    } }, [document.createTextNode("この端末を基準に同期を開始")]);
+    } }, [document.createTextNode("同期を開始")]);
     card.appendChild(startBtn);
-
-    card.appendChild(el("p", { text: "② 他の端末で既に同期を開始している場合は、上の欄に①と同じ手順で発行したトークンを入力したうえで、そちらの「達成度」画面に表示されているGist IDを下に入力し、接続してください（上のトークン欄とこのGist IDの欄、両方の入力が必要です）。" }));
-    var gistIdInput = el("input", { class: "sync-input", placeholder: "接続先のGist ID" });
-    card.appendChild(gistIdInput);
-    var connectBtn = el("button", { class: "btn secondary", onclick: function () {
-      var token = tokenInput.value.trim();
-      var gistId = gistIdInput.value.trim();
-      tokenInput.classList.remove("input-error");
-      gistIdInput.classList.remove("input-error");
-      if (!token && !gistId) {
-        status.textContent = "上のトークン欄とGist IDの欄の両方が空欄です。両方入力してください。";
-        tokenInput.classList.add("input-error");
-        gistIdInput.classList.add("input-error");
-        tokenInput.focus();
-        return;
-      }
-      if (!token) {
-        status.textContent = "上の「GitHubトークン（gistスコープ）」欄が空欄です。①の手順でトークンを発行して入力してください。";
-        tokenInput.classList.add("input-error");
-        tokenInput.focus();
-        return;
-      }
-      if (!gistId) {
-        status.textContent = "Gist IDが空欄です。接続したい端末の「達成度」画面に表示されているGist IDを入力してください。";
-        gistIdInput.classList.add("input-error");
-        gistIdInput.focus();
-        return;
-      }
-      connectBtn.disabled = true;
-      connectBtn.textContent = "接続中…";
-      setSyncToken(token);
-      setSyncGistId(gistId);
-      performSync().then(function (result) {
-        if (result.ok) {
-          renderAchievement();
-        } else {
-          clearSyncConfig();
-          connectBtn.disabled = false;
-          connectBtn.textContent = "既存のGistに接続する";
-          status.textContent = "接続に失敗しました: " + result.reason;
-        }
-      });
-    } }, [document.createTextNode("既存のGistに接続する")]);
-    card.appendChild(connectBtn);
-
+    card.appendChild(el("p", { class: "sync-note", text: "開始後、この画面に「他の端末をつなぐリンク」が表示されます。別の端末でそのリンクを開けば接続できます。" }));
     card.appendChild(status);
     return card;
   }
@@ -1003,6 +1070,32 @@
   document.getElementById("homeLink").addEventListener("click", renderHome);
 
   // ---------- Init ----------
-  renderHome();
-  if (isSyncConfigured()) performSync();
+  var linkedSync = parseSyncLinkHash(location.hash);
+  var importedSyncLink = false;
+  if (location.hash.indexOf("#sync=") === 0) {
+    // Remove the secret from the address bar / history right away.
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* ignore */ }
+    if (!linkedSync) {
+      alert("同期リンクが正しくありません。1台目の「達成度」画面に表示されているリンクを、最後までコピーして開いてください。");
+    } else if (!isSyncConfigured() || getSyncToken() !== linkedSync.token || getSyncGistId() !== linkedSync.gistId) {
+      if (!isSyncConfigured() || confirm("この端末の同期設定を、リンクの内容に置き換えますか？")) {
+        setSyncToken(linkedSync.token);
+        setSyncGistId(linkedSync.gistId);
+        setSyncError("");
+        importedSyncLink = true;
+      }
+    }
+  }
+
+  if (importedSyncLink) {
+    renderAchievement();
+    performSync().then(function (result) {
+      if (document.getElementById("syncCard")) renderAchievement();
+      if (result.ok) alert("同期設定が完了しました。他の端末の学習履歴が取り込まれました。");
+    });
+  } else {
+    renderHome();
+    if (isSyncConfigured()) performSync();
+  }
+  updateSyncBanner();
 })();

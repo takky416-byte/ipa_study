@@ -455,3 +455,25 @@ table.breakdown th { color: var(--color-text-sub); font-weight: 600; }
   .site-title { font-size: 1rem; }
   .score-hero .score-num { font-size: 2rem; }
 }
+
+/* Sync */
+.sync-banner {
+  max-width: 920px;
+  margin: 12px auto 0;
+  padding: 10px 16px;
+  background: var(--color-wrong-bg);
+  border: 1px solid var(--color-wrong);
+  border-radius: var(--radius);
+  color: var(--color-wrong);
+  font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  box-sizing: border-box;
+}
+#syncBanner { padding: 0 16px; }
+.sync-note { font-size: 0.8rem; color: var(--color-text-sub); }
+.sync-details { margin-top: 18px; font-size: 0.88rem; }
+.sync-details summary { cursor: pointer; color: var(--color-primary); }
