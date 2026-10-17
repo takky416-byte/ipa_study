@@ -1,7 +1,9 @@
 (function () {
   "use strict";
 
-  var QUESTIONS = (window.QUESTIONS_SAMPLE || []).concat(window.QUESTIONS_PAST || []);
+  var QUESTIONS = window.QUESTIONS_PAST || [];
+  var QUESTION_IDS = {};
+  QUESTIONS.forEach(function (q) { QUESTION_IDS[q.id] = true; });
   var HISTORY_KEY = "itsmStudyHistory_v1";
   var SESSION_LOG_KEY = "itsmSessionLog_v1";
   var MAX_SESSION_LOG = 300;
@@ -449,7 +451,7 @@
 
     var history = loadHistory();
     var total = QUESTIONS.length;
-    var answeredIds = Object.keys(history);
+    var answeredIds = Object.keys(history).filter(function (id) { return QUESTION_IDS[id]; });
     var answeredCount = answeredIds.length;
     var totalShown = 0, totalCorrect = 0;
     answeredIds.forEach(function (id) {
@@ -1023,18 +1025,11 @@
     var pastSets = getPastExamSets();
     if (pastSets.length > 0) {
       var yearCard = el("div", { class: "card" });
-      yearCard.appendChild(el("h2", { text: "年度別・出題元別の達成度" }));
+      yearCard.appendChild(el("h2", { text: "年度別の達成度" }));
       pastSets.forEach(function (s) {
         var mastered = s.questions.filter(function (q) { return getMastery(history[q.id]) === "mastered"; }).length;
         yearCard.appendChild(progressRow(s.year + "年" + s.session, mastered, s.questions.length));
       });
-      // Questions that do not belong to any exam year (the original practice set)
-      // would otherwise be missing from this card and make the totals look wrong.
-      var originals = QUESTIONS.filter(function (q) { return !q.year; });
-      if (originals.length > 0) {
-        var originalsMastered = originals.filter(function (q) { return getMastery(history[q.id]) === "mastered"; }).length;
-        yearCard.appendChild(progressRow("オリジナル演習問題（過去問以外）", originalsMastered, originals.length));
-      }
       app.appendChild(yearCard);
     }
 
