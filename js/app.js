@@ -1,20 +1,26 @@
 (function () {
   "use strict";
 
+  // 試験ごとの差分（localStorageのキー接頭辞・表示名など）。未指定ならITサービスマネージャ試験の設定。
+  var CONFIG = window.APP_CONFIG || {};
+  var KEY_PREFIX = CONFIG.keyPrefix || "itsm";
+  var EXAM_NAME = CONFIG.examName || "ITサービスマネージャ試験";
+  var SESSION_SUFFIX = CONFIG.sessionSuffix || "午前II";
+
   var QUESTIONS = window.QUESTIONS_PAST || [];
   var QUESTION_IDS = {};
   QUESTIONS.forEach(function (q) { QUESTION_IDS[q.id] = true; });
-  var HISTORY_KEY = "itsmStudyHistory_v1";
-  var SESSION_LOG_KEY = "itsmSessionLog_v1";
+  var HISTORY_KEY = KEY_PREFIX + "StudyHistory_v1";
+  var SESSION_LOG_KEY = KEY_PREFIX + "SessionLog_v1";
   var MAX_SESSION_LOG = 300;
   var HEATMAP_DAYS = 84;
   var CHOICE_KEYS = ["ア", "イ", "ウ", "エ"];
 
-  var SYNC_TOKEN_KEY = "itsmSyncToken_v1";
-  var SYNC_GIST_ID_KEY = "itsmSyncGistId_v1";
-  var SYNC_LAST_AT_KEY = "itsmSyncLastAt_v1";
-  var SYNC_ERROR_KEY = "itsmSyncError_v1";
-  var SYNC_FILENAME = "itsm-study-sync.json";
+  var SYNC_TOKEN_KEY = KEY_PREFIX + "SyncToken_v1";
+  var SYNC_GIST_ID_KEY = KEY_PREFIX + "SyncGistId_v1";
+  var SYNC_LAST_AT_KEY = KEY_PREFIX + "SyncLastAt_v1";
+  var SYNC_ERROR_KEY = KEY_PREFIX + "SyncError_v1";
+  var SYNC_FILENAME = KEY_PREFIX + "-study-sync.json";
 
   var MASTERY_LABELS = { unseen: "未学習", weak: "要復習", learning: "学習中", mastered: "習得済み" };
 
@@ -205,7 +211,7 @@
       method: "POST",
       headers: ghHeaders(token, true),
       body: JSON.stringify({
-        description: "ITサービスマネージャ試験 演習アプリ 学習履歴（同期用・自動生成。手動で編集しないでください）",
+        description: EXAM_NAME + " 演習アプリ 学習履歴（同期用・自動生成。手動で編集しないでください）",
         public: false,
         files: files
       })
@@ -525,7 +531,7 @@
           yearSelect,
           el("button", { class: "btn", onclick: function () {
             var s = pastSets[parseInt(yearSelect.value, 10)];
-            startQuiz(s.questions.slice(), s.year + "年" + s.session + " 午前II");
+            startQuiz(s.questions.slice(), s.year + "年" + s.session + " " + SESSION_SUFFIX);
           } }, [document.createTextNode("開始")])
         ])
       ]));
