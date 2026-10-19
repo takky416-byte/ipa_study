@@ -1,0 +1,15 @@
+/* システム監査技術者版の配色（共通の ../css/style.css の後に読み込んで上書き） */
+:root {
+  --color-bg: #f6f3fa;
+  --color-primary: #6a3fa0;
+  --color-primary-dark: #44226e;
+  --color-accent: #e0457b;
+  --color-border: #e3dcee;
+}
+.site-header { background: linear-gradient(135deg, #6a3fa0, #44226e); }
+.summary-stat { background: #f1ebf9; }
+.sync-id-box { background: #f8f5fc; }
+.btn.secondary { background: #eee9f5; }
+.btn.secondary:hover { background: #ddd3ec; }
+.category-badge { background: #efe8f9; }
+.choice-btn:hover:not(:disabled) { background: #f8f4fd; }
