@@ -68,6 +68,9 @@ python3 -m http.server 8000
 
 GitHub Pages 等の静的ホスティングにもそのまま配置できます。
 
+検索エンジンに載せないため、`index.html` に `noindex` の meta タグを入れ、リポジトリ直下に
+`robots.txt`（全クローラー拒否）を置いています。
+
 ## 問題データの形式
 
 問題データは `data/past-exams.js` の `window.QUESTIONS_PAST` 配列にあります。1問は次の形式です。
