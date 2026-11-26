@@ -65,7 +65,8 @@ function include(filename) {
 // ---------------------------------------------------------------------------
 function getSettings_() {
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('設定');
-  const s = { '画像URL': '', '教員メール': '', '解答控えメール': '1', '回答ログにも記録': '1', '自動保存間隔(秒)': '30' };
+  const s = { '画像URL': '', '教員メール': '', '解答控えメール': '1', '回答ログにも記録': '1', '自動保存間隔(秒)': '30',
+    'ログイン画面': '1', '試験画面タイトル': '応用情報技術者試験 科目B試験', 'チュートリアル時間(分)': '5' };
   if (!sh) return s;
   sh.getDataRange().getValues().forEach(function (r) { if (r[0]) s[String(r[0]).trim()] = String(r[1] == null ? '' : r[1]).trim(); });
   return s;
@@ -82,16 +83,52 @@ function isTeacher_() {
   return list.indexOf(email) >= 0;
 }
 
-function findStudent_(email) {
+/** 学生名簿（列：メールアドレス, クラス, 番号, 氏名, フリガナ, ユーザーID, パスワード）を読む */
+function readRoster_() {
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('学生名簿');
-  if (!sh || !email) return null;
-  const rows = sh.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]).trim().toLowerCase() === email) {
-      return { email: email, studentClass: String(rows[i][1]), studentNum: String(rows[i][2]), studentName: String(rows[i][3]) };
-    }
+  if (!sh) return [];
+  const v = sh.getDataRange().getValues();
+  const h = v.shift().map(function (x) { return String(x).trim(); });
+  const c = function (name) { return h.indexOf(name); };
+  return v.map(function (r, i) {
+    const g = function (name) { const k = c(name); return k < 0 ? '' : String(r[k] == null ? '' : r[k]).trim(); };
+    return { row: i + 2, email: g('メールアドレス').toLowerCase(), studentClass: g('クラス'), studentNum: g('番号'),
+      studentName: g('氏名'), kana: g('フリガナ'), userId: g('ユーザーID'), password: g('パスワード') };
+  }).filter(function (s) { return s.email || s.userId; });
+}
+
+function findStudent_(email) {
+  if (!email) return null;
+  return readRoster_().filter(function (s) { return s.email === email; })[0] || null;
+}
+
+function loginEnabled_() { return getSettings_()['ログイン画面'] !== '0'; }
+
+/** ログイン画面の ID・パスワードを確かめる。名簿にメールアドレスがある行は、そのアカウントでしか使えない */
+function verifyLogin_(creds) {
+  if (!creds || !creds.userId) return null;
+  const email = currentEmail_();
+  const s = readRoster_().filter(function (r) { return r.userId && r.userId === String(creds.userId).trim(); })[0];
+  if (!s || s.password !== String(creds.password || '')) throw new Error('ユーザーIDまたはパスワードが正しくありません。');
+  if (s.email && email && s.email !== email) throw new Error('このユーザーIDは、現在ログインしている Google アカウントでは使用できません。');
+  return { email: email || s.email, studentClass: s.studentClass, studentNum: s.studentNum, studentName: s.studentName, kana: s.kana };
+}
+
+/** 受験者を特定する。ログイン画面を使う設定なら ID・パスワード、使わない設定なら Google アカウント（名簿になければ手入力） */
+function resolveStudent_(p) {
+  if (loginEnabled_()) return { student: verifyLogin_(p), roster: '名簿' };
+  const st = findStudent_(currentEmail_());
+  if (st) return { student: st, roster: '名簿' };
+  if (p && p.studentClass && p.studentNum && p.studentName) {
+    return { student: { email: currentEmail_(), studentClass: p.studentClass, studentNum: p.studentNum, studentName: p.studentName }, roster: '手入力' };
   }
-  return null;
+  return { student: null, roster: '' };
+}
+
+/** ログイン画面の「Log in」 */
+function login(userId, password) {
+  const st = verifyLogin_({ userId: userId, password: password });
+  return { studentName: st.studentName, kana: st.kana };
 }
 
 // ---------------------------------------------------------------------------
@@ -178,9 +215,13 @@ function examVisibleTo_(exam, student, now) {
 // 学生向け API
 // ---------------------------------------------------------------------------
 /** ポータル表示用：ログイン者・受験できる試験・それぞれの受験状況 */
-function getPortalData() {
+function getPortalData(creds) {
+  const settings = getSettings_();
+  const base = { loginRequired: loginEnabled_(), title: settings['試験画面タイトル'], tutorialMin: Number(settings['チュートリアル時間(分)']) || 5,
+    imageBase: settings['画像URL'], autosaveSec: Number(settings['自動保存間隔(秒)']) || 30 };
+  if (base.loginRequired && !(creds && creds.userId)) return base;
   const email = currentEmail_();
-  const student = findStudent_(email);
+  const student = resolveStudent_(creds).student;
   const now = Date.now();
   const sessions = readSessions_(function (r) { return r.email === email; });
   const exams = buildExams_(false)
@@ -193,25 +234,18 @@ function getPortalData() {
         canReview: !!(s && s.status === '提出済み' && e.showAnswers && e.kind !== '考査')
       };
     });
-  const settings = getSettings_();
-  return {
-    email: email, student: student, exams: exams,
-    imageBase: settings['画像URL'], autosaveSec: Number(settings['自動保存間隔(秒)']) || 30
-  };
+  base.email = email; base.student = student; base.exams = exams;
+  return base;
 }
 
 /** 受験開始（または再開）。試験データ（解答例なし）と保存済みの状態を返す */
-function startExam(examId, manualProfile) {
+function startExam(examId, creds) {
   const email = currentEmail_();
   if (!email) throw new Error('Google アカウントのメールアドレスを取得できませんでした。学校のアカウントでログインしてください。');
-  let student = findStudent_(email);
-  let rosterMatched = !!student;
-  if (!student) {
-    if (!manualProfile || !manualProfile.studentClass || !manualProfile.studentNum || !manualProfile.studentName) {
-      return { needProfile: true };
-    }
-    student = { email: email, studentClass: manualProfile.studentClass, studentNum: manualProfile.studentNum, studentName: manualProfile.studentName };
-  }
+  const who = resolveStudent_(creds);
+  const student = who.student;
+  if (!student) return { needProfile: true };
+  const rosterMatched = who.roster === '名簿';
   const exam = buildExams_(false).filter(function (e) { return e.examId === examId; })[0];
   if (!exam) throw new Error('試験が見つかりません。');
   if (!examVisibleTo_(exam, student, Date.now())) throw new Error('この試験は現在受験できません。');

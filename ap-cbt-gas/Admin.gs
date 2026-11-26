@@ -5,6 +5,9 @@ function onOpen() {
     .addItem('初期設定（シート・列の追加）', 'setupSheets')
     .addItem('解答例を小問マスタに反映（解答例取込シートから）', 'importAnswers')
     .addSeparator()
+    .addItem('ログイン情報を発行（ユーザーID・パスワードが空欄の学生）', 'issueLoginInfo')
+    .addItem('ログイン情報シートを作成（配布用ドキュメント）', 'createLoginSheetsDoc')
+    .addSeparator()
     .addItem('教員画面のURLを表示', 'showTeacherUrl')
     .addItem('採点用ドキュメントを出力（受験記録から）', 'generateScoringDocFromSessions')
     .addToUi();
@@ -17,12 +20,15 @@ function setupSheets() {
   let st = ss.getSheetByName('設定');
   if (!st) {
     st = ss.insertSheet('設定');
-    st.getRange(1, 1, 6, 3).setValues([
+    st.getRange(1, 1, 9, 3).setValues([
       ['画像URL', 'https://cdn.jsdelivr.net/gh/takky416-byte/ipa_study@ap-cbt-b/ap-cbt/img/', '問題ページ画像の置き場所（末尾は /）'],
       ['教員メール', Session.getActiveUser().getEmail(), '教員画面を使えるアカウント（カンマ区切り）'],
       ['解答控えメール', '1', '提出時に学生へ解答の控えをメールで送る（1/0）'],
       ['回答ログにも記録', '1', '以前の「回答ログ」形式でも記録する（1/0）。output.gs がそのまま使える'],
       ['自動保存間隔(秒)', '30', '受験中の解答を保存する間隔'],
+      ['ログイン画面', '1', '本番と同じログイン画面（ユーザーID・パスワード）を使う（1/0）。0 なら Google アカウントで本人を特定'],
+      ['試験画面タイトル', '応用情報技術者試験 科目B試験', '試験画面の上部中央に表示する名称'],
+      ['チュートリアル時間(分)', '5', '受験者向けチュートリアルの時間'],
       ['', '', '']
     ]);
     st.setColumnWidth(1, 160); st.setColumnWidth(2, 520); st.setColumnWidth(3, 420);
@@ -31,9 +37,10 @@ function setupSheets() {
   let roster = ss.getSheetByName('学生名簿');
   if (!roster) {
     roster = ss.insertSheet('学生名簿');
-    roster.appendRow(['メールアドレス', 'クラス', '番号', '氏名']);
+    roster.appendRow(['メールアドレス', 'クラス', '番号', '氏名', 'フリガナ', 'ユーザーID', 'パスワード']);
     roster.setFrozenRows(1);
   }
+  addColumns_('学生名簿', ['フリガナ', 'ユーザーID', 'パスワード']);
 
   sessionSheet_();
 
@@ -46,7 +53,7 @@ function setupSheets() {
     imp.appendRow(['大問ID', '設問', '空欄・項目', '解答例', '備考']);
     imp.setFrozenRows(1);
   }
-  SpreadsheetApp.getUi().alert('初期設定が完了しました。\n\n・設定シートの「教員メール」を確認してください。\n・学生名簿シートに、学生のメールアドレス・クラス・番号・氏名を貼り付けてください。\n・試験マスタに「区分（考査/練習）」「対象クラス」「公開開始」「公開終了」「解答例表示」の列を追加しました（空欄なら制限なし）。');
+  SpreadsheetApp.getUi().alert('初期設定が完了しました。\n\n・設定シートの「教員メール」を確認してください。\n・学生名簿シートに、学生のメールアドレス・クラス・番号・氏名・フリガナを貼り付け、メニューの「ログイン情報を発行」を実行してください。\n・試験マスタに「区分（考査/練習）」「対象クラス」「公開開始」「公開終了」「解答例表示」の列を追加しました（空欄なら制限なし）。');
 }
 
 function addColumns_(sheetName, cols) {
@@ -169,4 +176,54 @@ function generateScoringDocFromSessions() {
   doc.saveAndClose();
   const html = HtmlService.createHtmlOutput('<p>' + sessions.length + ' 名分のドキュメントを作成しました。</p><p><a href="' + doc.getUrl() + '" target="_blank">ドキュメントを開く</a></p>').setWidth(420).setHeight(150);
   ui.showModalDialog(html, '出力完了');
+}
+
+/** 学生名簿のユーザーID・パスワードが空欄の行に、本番のログイン情報シートと同じ形式（数字のID・英数字のパスワード）を発行する */
+function issueLoginInfo() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('学生名簿');
+  if (!sh) { SpreadsheetApp.getUi().alert('学生名簿シートがありません。先に初期設定を実行してください。'); return; }
+  addColumns_('学生名簿', ['フリガナ', 'ユーザーID', 'パスワード']);
+  const v = sh.getDataRange().getValues();
+  const h = v[0].map(String), cId = h.indexOf('ユーザーID'), cPw = h.indexOf('パスワード'), cName = h.indexOf('氏名');
+  const used = {};
+  v.slice(1).forEach(function (r) { if (r[cId]) used[String(r[cId])] = true; });
+  const pwChars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let n = 0;
+  for (let i = 1; i < v.length; i++) {
+    if (!v[i][cName]) continue;
+    if (!v[i][cId]) {
+      let id;
+      do { id = String(Math.floor(1e9 + Math.random() * 9e9)); } while (used[id]);
+      used[id] = true;
+      sh.getRange(i + 1, cId + 1).setNumberFormat('@').setValue(id);
+      n++;
+    }
+    if (!v[i][cPw]) {
+      let pw = '';
+      for (let k = 0; k < 8; k++) pw += pwChars.charAt(Math.floor(Math.random() * pwChars.length));
+      sh.getRange(i + 1, cPw + 1).setNumberFormat('@').setValue(pw);
+    }
+  }
+  SpreadsheetApp.getUi().alert(n + ' 名にユーザーIDを発行しました。「ログイン情報シートを作成」で配布用の用紙を作れます。');
+}
+
+/** 受験者ごとに切り離して配れる「ログイン情報シート」をドキュメントで作る */
+function createLoginSheetsDoc() {
+  const roster = readRoster_().filter(function (s) { return s.userId; });
+  roster.sort(function (a, b) { return (a.studentClass + a.studentNum).localeCompare(b.studentClass + b.studentNum, 'ja', { numeric: true }); });
+  if (!roster.length) { SpreadsheetApp.getUi().alert('ユーザーIDが発行された学生がいません。'); return; }
+  const doc = DocumentApp.create('ログイン情報シート_' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd'));
+  const body = doc.getBody();
+  roster.forEach(function (s, i) {
+    if (i && i % 4 === 0) body.appendPageBreak();
+    body.appendParagraph('ログイン情報シート').setHeading(DocumentApp.ParagraphHeading.HEADING3);
+    body.appendParagraph(s.studentClass + '-' + s.studentNum + '　' + s.studentName + ' 様');
+    const t = body.appendTable([['ユーザーID', s.userId], ['パスワード', s.password]]);
+    t.setColumnWidth(0, 110);
+    body.appendParagraph('署名：＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿　　※試験終了後は回収します。');
+    body.appendParagraph('- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -');
+  });
+  doc.saveAndClose();
+  const html = HtmlService.createHtmlOutput('<p>' + roster.length + ' 名分のログイン情報シートを作成しました。</p><p><a href="' + doc.getUrl() + '" target="_blank">ドキュメントを開く</a></p>').setWidth(420).setHeight(150);
+  SpreadsheetApp.getUi().showModalDialog(html, '作成完了');
 }

@@ -251,4 +251,98 @@ textarea.multi { display: block; width: 100%; min-height: 128px; border: 0; resi
 .pdf-guard { position: absolute; top: 0; right: 0; width: 80px; height: 64px; }
 .save-state { font-size: 10px; color: #666; margin-right: 8px; align-self: center; }
 .save-state.ng { color: var(--red); font-weight: bold; }
+
+/* ---------- ログイン画面（本番の構成に合わせる。ロゴは使わない） ---------- */
+.lg-wrap { min-height: 100vh; background: linear-gradient(#f6f9fc, #e7f1fb); display: flex; align-items: center; justify-content: center; padding: 30px 16px; }
+.lg-card { position: relative; width: 680px; max-width: 100%; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+.lg-lock { position: absolute; left: 50%; top: -28px; transform: translateX(25%); width: 58px; height: 58px; border-radius: 50%; background: #1d3557; display: flex; align-items: center; justify-content: center; }
+.lg-top { display: flex; min-height: 340px; border-bottom: 1px solid #e3e6ea; }
+.lg-left { flex: 0 0 255px; background: #1d3557; color: #fff; position: relative; padding: 150px 22px 20px; font-size: 12px; line-height: 1.7; overflow: hidden; }
+.lg-shield { position: absolute; left: 0; top: 0; width: 110px; height: 108px; background: rgba(255,255,255,.12); clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%); }
+.lg-left p { margin: 0; position: relative; }
+.lg-right { flex: 1; padding: 40px 70px 20px 90px; display: flex; flex-direction: column; }
+.lg-right h2 { font-size: 26px; margin: 0 0 18px; color: #1d2b3a; letter-spacing: 2px; }
+.lg-right label { font-size: 10px; color: #333; margin-top: 8px; }
+.lg-input { border: 0; border-bottom: 2px solid #1d3557; background: #f3f6f9; height: 34px; font-size: 15px; padding: 0 6px; outline: none; margin-top: 4px; }
+.lg-btn { margin: 26px 0 0; height: 38px; width: 200px; align-self: center; border: 0; border-radius: 3px; background: #1d3557; color: #fff; font-size: 14px; letter-spacing: 1px; }
+.lg-btn:disabled { background: #e1e6ee; color: #7b8796; }
+.lg-err { color: #c62828; font-size: 12px; margin-top: 10px; min-height: 18px; text-align: center; }
+.lg-bottom { padding: 34px 20px 40px; text-align: center; color: #1d3557; }
+.lg-brand { font-size: 18px; letter-spacing: 2px; }
+.lg-brand-sub { font-size: 11px; color: #777; margin-top: 6px; }
+
+/* 氏名確認 */
+.nc-box { width: 430px; max-width: 94vw; background: #fff; box-shadow: 0 4px 20px rgba(0,0,0,.3); border-radius: 2px; overflow: hidden; }
+.nc-title { display: flex; align-items: center; justify-content: space-between; font-size: 10px; padding: 3px 8px; border-bottom: 2px solid #1d3557; }
+.nc-x { border: 0; background: none; font-size: 14px; color: #555; cursor: pointer; }
+.nc-name { margin: 10px auto 10px; width: fit-content; border: 2px solid #e05252; padding: 2px 14px 4px; text-align: center; color: #2531d6; }
+.nc-kana { font-size: 13px; letter-spacing: 3px; }
+.nc-kanji { font-size: 21px; font-weight: bold; letter-spacing: 3px; }
+.nc-text { font-size: 11px; padding: 6px 36px 16px; white-space: pre-wrap; line-height: 1.6; }
+.nc-box .row { display: flex; justify-content: center; gap: 18px; background: #ececec; padding: 7px 0; }
+.nc-box .row .btn { min-width: 74px; height: 22px; }
+
+/* ---------- トップ画面（試験一覧） ---------- */
+.tl-wrap { min-height: 100vh; background: #fff; }
+.tl-bar { height: 40px; background: #1652a6; color: #fff; display: flex; align-items: center; justify-content: flex-end; padding: 0 22px; gap: 18px; }
+.tl-user { font-size: 12px; opacity: .9; }
+.tl-logout { border: 0; background: none; color: #fff; font-size: 16px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-family: inherit; }
+.tl-main { position: relative; max-width: 760px; margin: 0 auto; padding: 26px 16px 60px; font-size: 13px; color: #333; }
+.tl-inv { position: absolute; right: -150px; top: 10px; display: flex; flex-direction: column; align-items: center; font-size: 8px; gap: 2px; }
+@media (max-width: 1100px) { .tl-inv { right: 0; } }
+.tl-p { white-space: pre-wrap; margin: 0 0 18px; line-height: 1.6; }
+.tl-p.red { color: #e00; }
+.tl-ime { width: 486px; max-width: 100%; margin: 26px auto 34px; border: 2px solid #ddd; padding: 12px 22px; text-align: left; white-space: pre-wrap; line-height: 1.6; }
+.tl-radios { text-align: center; margin: 6px 0; }
+.tl-radios label { margin: 0 10px; }
+.tl-try { display: block; width: 354px; max-width: 100%; height: 26px; margin: 6px auto 8px; border: 1px solid #bbb; padding: 0 6px; font-size: 14px; }
+.tl-head { font-size: 17px; margin: 0 0 10px; display: flex; align-items: center; gap: 6px; }
+.tl-row { display: flex; align-items: center; justify-content: space-between; background: #eee; padding: 14px 18px 14px 22px; margin-bottom: 4px; font-size: 15px; color: #555; }
+.tl-take { min-width: 104px; height: 34px; border: 1px solid #1e2a78; background: #222c7d; color: #fff; font-size: 12px; cursor: pointer; font-family: inherit; }
+.tl-take:disabled { background: #b9bec8; border-color: #b9bec8; cursor: default; }
+
+/* ---------- チュートリアルの HTML ページ ---------- */
+.html-page { overflow: hidden; background: #fff; }
+.html-page .paper { width: 860px; padding: 70px 90px 90px; transform-origin: 0 0; font-size: 17px; line-height: 2; color: #111; }
+.paper h1.tt { font-size: 22px; text-align: center; margin: 0 0 24px; }
+.paper h2 { font-size: 18px; margin: 22px 0 6px; }
+.paper ul { padding-left: 1.2em; margin: 0; }
+.paper .opts { padding-left: 1em; }
+
+/* ---------- 本番に合わせた細部 ---------- */
+.tool { width: 19px; height: 19px; background: #1c3e72; border: 1px solid #1c3e72; border-radius: 1px; }
+.tool i { width: 11px; height: 11px; }
+.tool.sel { outline: 2px solid #ffd400; outline-offset: 0; background: #1c3e72; }
+.tool svg { width: 13px; height: 13px; }
+.remain.warn { color: inherit; }
+.btn.green { background: #00a000; border-color: #008a00; color: #fff; }
+.win.green { border-color: #00a000; }
+.win.green .win-title { background: #00a000; }
+.win.green .win-title .sz { background: #fff; color: #333; border-color: #ccc; }
+.win.green .win-title .sz.on { background: #fff; color: #333; box-shadow: inset 0 0 0 1px #333; }
+/* 電卓 */
+.win.calc-win { border: 1px solid #8a8f98; min-width: 0; min-height: 0; box-shadow: 0 3px 12px rgba(0,0,0,.25); }
+.calc-win .win-title { background: #eef1f6; color: #222; flex-basis: 24px; font-size: 11px; }
+.calc { padding: 0; gap: 0; background: #000; }
+.calc-band { flex: 0 0 auto; height: 2.2em; background: #000; display: flex; justify-content: flex-end; align-items: flex-start; gap: 2px; padding: 3px 4px 0; }
+.csz { width: 1.6em; height: 1.3em; border: 0; background: #1c3e72; color: #fff; font-size: .62em; padding: 0; cursor: pointer; }
+.csz.on { background: #ffa500; }
+.calc-disp { flex: 0 0 auto; height: 2.3em; line-height: 2.3em; border: 0; background: #fff; font-size: 1.15em; padding: 0 .5em; text-align: right; font-family: "Meiryo", sans-serif; }
+.calc-keys { gap: 2px; padding: 2px; background: #000; }
+.calc-keys button { background: #14427c; color: #fff; border: 0; font-size: 1.05em; cursor: pointer; }
+.calc-keys button:active { background: #2a5fa6; }
+/* メモ */
+.memo-tools { gap: 8px; }
+.memo-tools .txt { font-size: 10px; color: #444; }
+.clrs { display: inline-flex; gap: 2px; }
+.memo-tools .clr { width: 21px; height: 21px; border-radius: 3px; border: 1px solid #c8c8c8; display: inline-flex; align-items: center; justify-content: center; }
+.ms-row { display: none; align-items: center; gap: 4px; padding: 3px 8px; border-bottom: 1px solid #d5dae1; }
+.ms-row.show { display: flex; }
+.ms-input { width: 150px; height: 22px; border: 1px solid #bbb; font-size: 13px; padding: 0 4px; }
+.ms-count { display: inline-block; min-width: 40px; height: 22px; line-height: 20px; border: 1px solid #bbb; text-align: center; font-size: 10px; color: #777; }
+.ms-nav { width: 22px; height: 22px; border: 1px solid #ccc; background: #fff; font-size: 11px; cursor: pointer; }
+.ms-x { border: 0; background: none; font-size: 14px; color: #555; cursor: pointer; }
+::highlight(memo-hit) { background-color: #ffeb3b; }
+.ime { background: #fff; color: #1c3e72; border: 1px solid #fff; }
+.ime.on { background: #1f6fe5; color: #fff; border-color: #1f6fe5; }
 </style>
