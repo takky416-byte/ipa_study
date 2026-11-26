@@ -109,42 +109,60 @@
     });
   }
   function tutorialProblems() {
-    var p1 = '<h1 class="tt">受験者向け チュートリアル</h1>' +
-      '<p>このチュートリアルでは、試験画面の操作方法を確認します。実際の試験と同じ操作ができます。入力した内容は保存されません。</p>' +
-      '<h2>画面の構成</h2><ul>' +
-      '<li>画面の左側に「問題文」、右側に「解答欄」が表示されます。左右の枠の境目をドラッグすると、表示の割合を変えられます。</li>' +
-      '<li>画面上部には、残り時間と「問題選択」「メモ」「参考資料（注意事項）」「試験終了」ボタン、「白黒反転」が表示されます。</li>' +
-      '<li>問題文の上のツールバーで、問題文の拡大・縮小、マーカー（赤・青・黄、消しゴム、サイズ、クリア）を使えます。</li>' +
-      '<li>画面下部には「解答状況」「電卓」「問題（別画面）」「後で見直す」「前の問題」「次の問題」ボタンが表示されます。</li></ul>' +
-      '<p>「次の問題」ボタンで次のページに進んでください。</p>';
-    var p2 = '<h2>試験中の操作</h2><ul>' +
-      '<li><b>問題選択</b>：試験開始時に「問題選択」の画面が表示されます。必須の問題は選択された状態です。解答する問題番号を選び、必ず「選択」ボタンを押してください。試験時間内は何度でも選び直せます。</li>' +
-      '<li><b>後で見直す</b>：判断に迷う設問は、設問番号の上のチェックボックスを選択します。「後で見直す」ボタンを押すと、表示中の問題の解答欄すべてにチェックが付きます。</li>' +
-      '<li><b>解答状況</b>：「未解答」「解答済み」「後で見直すもの」「解答中」が色分けされた設問の一覧が表示され、選択するとその設問に移動します。</li>' +
-      '<li><b>メモ</b>：画面上にメモを表示します。カット・コピー・ペーストはボタンで行います。キー操作でのカット・コピー・ペーストや、問題文のコピーはできません。</li>' +
-      '<li><b>電卓</b>：画面上に電卓を表示します。「小・中・大」で大きさを変えられ、タイトルバーをドラッグして移動できます。</li>' +
-      '<li><b>問題（別画面）</b>：同じ問題文を別のウィンドウで表示します。</li>' +
-      '<li><b>試験終了</b>：受験している科目を終了します。残り時間が0になった場合は自動的に終了します。</li></ul>' +
-      '<p>マーカーで、この文章に線を引いてみましょう。</p>';
-    var p3 = '<p>操作確認用のサンプル問題です。解答の操作をしてみましょう。</p>' +
-      '<p>チュートリアルはこのページで終了です。<br>本試験に進む場合は、画面右上の「確認終了」ボタンを押してチュートリアルを終了してください。</p>' +
-      '<p><b>設問1</b>　選択による解答です。<br>下記の[ a ]に入る値を選択しなさい。<br>1 ＋ 1 ＝ [ a ]</p><p class="opts">ア　1　　イ　2　　ウ　3　　エ　4</p>' +
-      '<p><b>設問2</b>　チェックボックスによる解答です。<br>計算結果が「2」になるものをすべて選択しなさい。</p><p class="opts">ア　1＋1　　イ　2×2　　ウ　4÷2　　エ　2－1</p>' +
-      '<p><b>設問3</b>　プルダウンによる解答です。<br>3 － 1 ＝ [ b ]　の[ b ]に入る値を選択しなさい。</p>' +
-      '<p><b>設問4</b>　1行の解答欄です。<br>100 ＋ 23 の計算結果を数字で入力しなさい。</p>' +
-      '<p><b>設問5</b>　複数行の解答欄です。<br>自由に文章を入力してみましょう（100字以内）。</p>';
+    var P = [];
+    P.push('<h2 class="tt2">試験画面の構成</h2><ul>' +
+      '<li>試験名が画面上部の中央に表示されます。その下に「○ページ中○ページ目」が表示されます。</li>' +
+      '<li>画面右上に、残り時間と「問題選択」「メモ」「参考資料（注意事項）」「試験終了」ボタンが表示されます。試験ごとの参考資料がある場合は「参考資料」、ない場合は「注意事項」のボタンが表示され、押すと参考資料や注意事項を確認できます。</li>' +
+      '<li>画面の左側に問題文が、右側に解答欄が表示されます。左の選択肢を見て、右の解答欄で解答を選択します。選択するとボタンの色が変わり、再度選択すると未解答に戻ります。</li>' +
+      '<li>画面下部の「解答状況」で解答状況一覧の表示／非表示を切り替えられます。「電卓」で電卓が、「問題（別画面）」で問題が別の画面に表示されます。</li>' +
+      '<li>「後で見直す」を押すと、解答状況一覧で「後で見直すもの」として表示されます。「前の問題」で1つ前の問題へ戻り、「次の問題」で次の問題へ進みます。</li></ul>');
+    P.push('<h2 class="tt2">白黒反転について</h2><p>試験開始前及び試験中に，白黒反転の切り替えボタンが，画面右上に表示されます。</p>' +
+      '<p>切り替えボタンを押すと，白黒反転表示に切り替わります。白黒反転表示の状態で再度ボタンを押すと，非反転表示に戻ります。</p>' +
+      '<p class="tt-try">画面右上の「白黒反転」を押して，表示を切り替えてみましょう。</p>');
+    P.push('<h2 class="tt2">拡大・縮小について</h2><p>問題文の上のスライダーを左右に動かすことで，試験問題の拡大・縮小ができます。</p>' +
+      '<p>左右の枠の境目を動かすことで，左右の画面の表示割合を変更できます。</p>' +
+      '<p>参考資料の画面でも，スライダーを左右に動かすことで参考資料の拡大・縮小ができます。</p>' +
+      '<p class="tt-try">スライダーや枠の境目を動かしてみましょう。</p>');
+    P.push('<h2 class="tt2">電卓について</h2><p>電卓ボタンを押すと画面上に電卓が表示されます。閉じる場合は再度電卓ボタンを押してください。電卓のサイズは右上の「小・中・大」ボタンで変更できます。</p>' +
+      '<h2 class="tt2">メモについて</h2><p>メモボタンを押すと画面上にメモが表示されます。</p><ul>' +
+      '<li>メモを半透明にし，下の問題が透けて見えるようにします。</li>' +
+      '<li>文字にマーカーを引くことができます。マーカーは赤，青，黄色があります。白はマーカーを消します。また，メモ内容は試験が終了するまで保持されます。</li>' +
+      '<li>入力方式を変更できます。変更した入力方式はメモ及び解答欄にも適用されます。</li>' +
+      '<li>メモの入力内容を検索できます。</li></ul>');
+    P.push('<h2 class="tt2">問題選択について</h2><p>問題選択が必要な科目においては，試験開始時に問題選択のウィンドウが表示されます。<span class="red">採点は選択された問題のみとなりますので，試験終了までに問題を選択してください。</span>必須の問題がある場合にはすでに選択された状態です。</p>' +
+      '<p>選択が必要な問題数が表示されていますので，必要数を選択してください。問題選択ボタンを押すことで再度問題選択のウィンドウを出すことができます。</p>' +
+      '<p class="red">選択後必ず選択ボタンを押してください。選択ボタンを押さないで試験終了した場合，画面上で問題を選択していても選択問題として反映されません。</p>' +
+      '<p>試験終了ボタンを押した時点で，選択が必要な問題数が不足している場合は，アラートが表示されます。「はい」を押すと試験終了へ進み，「いいえ」を押すと試験画面へ戻ります。</p>' +
+      '<p>必要選択数を超えている場合には，メッセージが表示されます。正しく選択しなおしてください。</p>');
+    P.push('<h2 class="tt2">問題（別画面）について</h2><p>問題（別画面）ボタンを押すと，別ウィンドウで同じ問題が表示されます。問題文の上部と下部を同時に確認したり，問題文と図を同時に確認する場合にご利用ください。モニター上での移動やサイズ変更が可能です。マーカー機能も使用可能です。</p>' +
+      '<p class="tt-try">画面下部の「問題（別画面）」を押してみましょう。</p>');
+    P.push('<h2 class="tt2">マーカーについて</h2><p>マウス操作によって，問題に直接書き込むことができます。書き込みした内容は試験が終了するまで保持されます。</p><ul>' +
+      '<li>矢印のボタンで通常モードにします。</li><li>赤・青・黄のボタンでマーカーモードにし，マーカーの色を選択できます。</li>' +
+      '<li>消しゴムのボタンで消しゴムモードにします。消しゴムでマーカーを消すことができます。</li>' +
+      '<li>「サイズ」のスライドでマーカーの太さを選択できます。「クリア」で書き込みしたものを一括で消すことができます。</li></ul>' +
+      '<h2 class="tt2">チェックボックス，プルダウンについて</h2><p>選択肢の中から，該当するものを選択してください。</p>' +
+      '<h2 class="tt2">記述式解答欄について</h2><p>記述式解答欄は次の２種類があります。キーボードでの入力，及び「コピー」等の編集機能を使用して解答してください。試験中に文字入力方式を変更するときは，画面右上のメモボタンを押してメモを起動し，メモ画面右上の「ローマ字／かな」で変更してください。</p>' +
+      '<p>①解答欄が1行のもの：設問内容によっては，文字の入力制限（字数・英数字など）があります。</p>' +
+      '<p>②解答欄が複数行のもの：文字を選択した状態でボタンを押すと「カット」「コピー」が可能です。メモや他の解答欄にも「ペースト」で貼り付けが可能です。なお，これらのボタンがない解答欄には「ペースト」できません。検索ボタンを押すと，下部に検索ボックスが表示されますので単語を入力してください。検索でヒットした場合は黄色でハイライトされます。文字数の入力制限がある場合は右下に表示されます。制限数以上の入力をした場合，最大数に合わせて削除されます。右下をドラッグすると入力欄を広げることができます。</p>');
+    P.push('<p>操作確認用のサンプル問題です。解答の操作をしてみましょう。</p><p class="tt-gap">チュートリアルはこのページで終了です。<br>&nbsp;本試験に進む場合は，画面右上の「確認終了」ボタンを押してチュートリアルを終了してください。<br>チュートリアルを終了するとチュートリアル終了画面が表示されます。</p>' +
+      '<p class="tt-gap"><b>設問 1</b>　選択による解答です。</p><p>下記の[ a ]に入る値を選択しなさい。</p><p>1 ＋ 1 ＝ [ a ]</p><p>ア　1　　　　　イ　2　　　　　ウ　3　　　　　エ　4</p>' +
+      '<p class="tt-gap"><b>設問 2</b>　チェックボックスによる解答です。</p><p>計算結果が「2」になるものをすべて選択しなさい。</p><p>ア　1＋1　　　イ　2×2　　　ウ　4÷2　　　エ　2－1</p>' +
+      '<p class="tt-gap"><b>設問 3</b>　リスト（プルダウン）による解答です。</p><p>下記の[ a ]に入る値を選択しなさい。</p><p>1 ＋ 1 ＝ [ a ]</p>' +
+      '<p class="tt-gap"><b>設問 4</b>　単語（短文）入力による解答です。</p><p>以下の[ a ]に入る値を入力しなさい。</p><p>税率が10%の場合，500円の税込み価格は[ a ]円です。</p>' +
+      '<p class="tt-gap"><b>設問 5</b>　記述（論述）入力による解答です。</p><p>長文の入力ができます。<br>ご自由に入力してお試しください。</p>');
+    var Z = "０１２３４５６７８";
     function f(sid, type, extra) { var o = { sid: sid, key: "", type: type }; for (var k in extra) o[k] = extra[k]; return o; }
-    return [
-      { idx: 0, qid: "tut1", label: "1ページ目", title: "", pages: [{ html: p1 }], items: [{ label: "1ページ目", fields: [] }] },
-      { idx: 1, qid: "tut2", label: "2ページ目", title: "", pages: [{ html: p2 }], items: [{ label: "2ページ目", fields: [] }] },
-      { idx: 2, qid: "tut3", label: "3ページ目", title: "", pages: [{ html: p3 }], items: [
+    return P.map(function (html, i) {
+      var page = { idx: i, qid: "tut" + (i + 1), label: (i + 1) + "ページ目", title: "", pages: [{ html: html }], items: [{ label: Z.charAt(i + 1) + "ページ目", fields: [] }] };
+      if (i === 7) page.items = [
         { label: "設問1", fields: [f("t1", "choice", { options: ["ア", "イ", "ウ", "エ"] })] },
         { label: "設問2", fields: [f("t2", "multi", { options: ["ア", "イ", "ウ", "エ"] })] },
         { label: "設問3", fields: [f("t3", "pulldown", { options: ["1", "2", "3", "4"] })] },
         { label: "設問4", fields: [f("t4", "line", { max: 10 })] },
         { label: "設問5", fields: [f("t5", "text", { max: 100 })] }
-      ] }
-    ];
+      ];
+      return page;
+    });
   }
 
   function referencePages() {
@@ -387,6 +405,15 @@
   function startTutorial() {
     TUTORIAL = true;
     requestFullscreen();
+    root.innerHTML = "";
+    var mins = PORTAL.tutorialMin || 5;
+    root.appendChild(el("div", { class: "tt-wrap" }, [
+      el("div", { class: "tt-head", text: "受験者向け チュートリアル" }),
+      el("div", { class: "tt-body", text: "CBT方式での受験にあたって、CBT方式の基本的な受験方法と操作方法の説明を行います。\n\n画面上部に表示されている残り時間が0になると自動で終了します。\n\n画面右下の「確認開始」ボタンを押すと、開始します。\n\n説明は全8ページ（8画面）の構成です。\n1ページ目から7ページ目は、試験画面の操作説明です。\n8ページ目は、操作確認用のサンプル問題（1問）です。\n\n本チュートリアルは演習用であり、入力された解答は送信されません。" }),
+      el("div", { class: "tt-foot" }, [el("button", { class: "btn navy tt-go", text: "確認開始", onclick: beginTutorial })])
+    ]));
+  }
+  function beginTutorial() {
     EXAM = { examName: "受験者向け チュートリアル", selectionLimit: 1, duration: PORTAL.tutorialMin || 5 };
     SESSION = { id: "tutorial", endAt: Date.now() + (PORTAL.tutorialMin || 5) * 60000 };
     clockOffset = 0;
@@ -874,12 +901,13 @@
     var countEl = el("div", { class: "sel-count" }), msg = el("div", { class: "sel-msg" });
     function upd() { countEl.textContent = "選択中：" + pending.length + " / " + EXAM.selectionLimit + " 問"; }
     var list = PROBS.map(function (P) {
-      var cb = el("input", { type: "checkbox", checked: pending.indexOf(P.qid) >= 0, disabled: P.required });
+      var cb = el("input", { type: "checkbox", checked: pending.indexOf(P.qid) >= 0 });
+      if (P.required) cb.addEventListener("click", function (e) { e.preventDefault(); });   // 必須問題は外せない（見た目は通常のチェック）
       cb.addEventListener("change", function () {
         if (cb.checked) { if (pending.indexOf(P.qid) < 0) pending.push(P.qid); } else pending = pending.filter(function (n) { return n !== P.qid; });
-        msg.textContent = ""; upd();
+        msg.textContent = pending.length > EXAM.selectionLimit ? "選択問題を " + EXAM.selectionLimit + " 問選んでください。" : ""; upd();
       });
-      return el("label", null, [cb, "問題" + P.label.replace(/^問/, "") + "　" + P.title + (P.required ? "（必須）" : "")]);
+      return el("label", null, [cb, "問題" + toHalf(P.label).replace(/^問\s*/, "")]);
     });
     upd();
     var body = el("div", { class: "sel-body" }, [
@@ -888,7 +916,7 @@
       el("div", { class: "red", text: "「選択」が押されるまでは選択問題は反映されません。" }), countEl
     ].concat(list).concat([msg]));
     var foot = el("div", { class: "win-foot" }, [el("button", { class: "btn navy", text: "選択", onclick: function () {
-      if (pending.length > EXAM.selectionLimit) { msg.textContent = "選択できる問題数は " + EXAM.selectionLimit + " 問です。選択を見直してください。"; return; }
+      if (pending.length > EXAM.selectionLimit) { msg.textContent = "選択問題を " + EXAM.selectionLimit + " 問選んでください。"; return; }
       S.selected = PROBS.filter(function (P) { return pending.indexOf(P.qid) >= 0; }).map(function (P) { return P.qid; });
       markDirty(); save(true);
       selWin.remove(); selWin = null; renderAnswers();
@@ -1105,7 +1133,16 @@
     if (finishing) return;
     finishing = true;
     leaveExam();
-    if (TUTORIAL) { finishing = false; TUTORIAL = false; boot(); return; }
+    if (TUTORIAL) {
+      finishing = false; TUTORIAL = false;
+      root.innerHTML = "";
+      root.appendChild(el("div", { class: "tt-wrap" }, [
+        el("div", { class: "tt-head", text: "受験者向け チュートリアル" }),
+        el("div", { class: "tt-body", text: "チュートリアルは終了しました。\n\n画面右下の「試験一覧へ」ボタンを押して、試験一覧に戻ってください。" }),
+        el("div", { class: "tt-foot" }, [el("button", { class: "btn navy tt-go", text: "試験一覧へ", onclick: boot })])
+      ]));
+      return;
+    }
     overlay("試験を終了しています...");
     var tries = 0;
     (function send() {
