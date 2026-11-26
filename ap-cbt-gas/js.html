@@ -101,7 +101,9 @@
         it.fields.push(toField(sq, p.key));
       });
       var n = man[q.questionId] || 0, pages = null;
-      if (n && base) { pages = []; for (var k = 1; k <= n; k++) pages.push(base + q.questionId + "/" + k + ".png"); }
+      var txt = (window.CBT_TEXT || {})[q.questionId];
+      if (txt && base) pages = txt.map(function (h, k) { return { html: h.replace(/\{BASE\}/g, base), text: true, no: k + 1 }; });
+      else if (n && base) { pages = []; for (var k = 1; k <= n; k++) pages.push(base + q.questionId + "/" + k + ".png"); }
       return { idx: i, qid: q.questionId, label: q.qNumber, title: q.category || "", theme: q.theme || "",
         source: q.source || "", required: q.required, pdfId: q.pdfId, pages: pages, items: items };
     });
@@ -153,7 +155,32 @@
     }
     return null;
   }
+  /** 問題文の文字データ（img/大問ID/text.js）を読み込む。ない大問は画像で表示する */
+  function loadTexts(exam, cb) {
+    var base = PORTAL.imageBase, left = 0, done = false;
+    if (!base) { cb(); return; }
+    window.CBT_TEXT = window.CBT_TEXT || {};
+    function fin() { if (!done && --left <= 0) { done = true; cb(); } }
+    exam.questions.forEach(function (q) {
+      if (window.CBT_TEXT[q.questionId]) return;
+      left++;
+      var s = document.createElement("script");
+      s.src = base + q.questionId + "/text.js";
+      s.onload = fin; s.onerror = fin;
+      document.head.appendChild(s);
+    });
+    if (!left) { done = true; cb(); }
+    setTimeout(function () { if (!done) { done = true; cb(); } }, 8000);
+  }
+  /** 問題文のフォント（IPAゴシック。問題冊子と同じ字形） */
+  function loadFont() {
+    if (!PORTAL.imageBase || document.getElementById("qfont")) return;
+    var st = document.createElement("style"); st.id = "qfont";
+    st.textContent = '@font-face{font-family:"IPAGothicCBT";src:url("' + PORTAL.imageBase + '../font/ipag.ttf") format("truetype");font-display:block;}';
+    document.head.appendChild(st);
+  }
   function loadManifest(cb) {
+    loadFont();
     if (!PORTAL.imageBase || window.CBT_IMG_MANIFEST) { cb(); return; }
     var s = document.createElement("script");
     s.src = PORTAL.imageBase + "manifest.js";
@@ -336,6 +363,10 @@
       if (r.alreadySubmitted) { boot(); return; }
       EXAM = r.exam; SESSION = r.session; STUDENT = r.student;
       clockOffset = r.serverNow - Date.now();
+      overlay("読み込み中...");
+      loadTexts(EXAM, function () { overlay(null); begin(); });
+    }).catch(function (err) { overlay(null); dialog("確認", String(err.message || err), null); });
+    function begin() {
       PROBS = buildProblems(EXAM);
       var local = store("apcbt-gas:" + SESSION.id);
       var d = SESSION.data || {};
@@ -349,7 +380,7 @@
       }
       if (local) { S.leaveCount = local.leaveCount || 0; S.cur = local.cur || 0; }
       renderExam(!(SESSION.selected && SESSION.selected.length));
-    }).catch(function (err) { overlay(null); dialog("確認", String(err.message || err), null); });
+    }
   }
 
   /** 受験者向けチュートリアル（サーバーには保存しない） */
@@ -591,8 +622,9 @@
         if (P.pages) {
           wrap = el("div", { class: "pages" });
           P.pages.forEach(function (src) {
-            if (typeof src === "object") {   // HTML で書いたページ（チュートリアル）
-              var paper = el("div", { class: "paper", html: src.html });
+            if (typeof src === "object") {   // HTML で書いたページ（問題文の文字データ・チュートリアル）
+              var paper = el("div", { class: "paper" + (src.text ? " qtext" : ""), html: src.html + (src.text ? '<div class="pno">－ ' + src.no + ' －</div>' : "") });
+              Array.prototype.forEach.call(paper.querySelectorAll("img"), function (im) { im.draggable = false; im.addEventListener("load", function () { v.relayout(); }); });
               var hc = el("canvas", { width: 860, height: 1200 });
               attachDraw(hc); canvases.push(hc);
               var pg = el("div", { class: "page html-page" }, [paper, hc]);

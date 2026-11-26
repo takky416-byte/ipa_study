@@ -345,4 +345,37 @@ textarea.multi { display: block; width: 100%; min-height: 128px; border: 0; resi
 ::highlight(memo-hit) { background-color: #ffeb3b; }
 .ime { background: #fff; color: #1c3e72; border: 1px solid #fff; }
 .ime.on { background: #1f6fe5; color: #fff; border-color: #1f6fe5; }
+
+/* ---------- 問題文（文字データ）：問題冊子と同じ IPAゴシック・同じ組み方 ---------- */
+.paper.qtext { font-family: "IPAGothicCBT", "IPAGothic", "IPAゴシック", "MS Gothic", "ＭＳ ゴシック", monospace; font-size: 18px; letter-spacing: .05em;
+  line-height: 2.15; padding: 64px 68px 40px 72px; min-height: 1216px; position: relative; color: #000; }
+.qtext p { margin: 0; }
+.qtext .sp { margin-top: 1.1em; }
+.qtext .ind { text-indent: 1em; }
+.qtext .must { border: 2px solid #000; padding: 0 0 0 1.6em; margin: 0 0 .5em; }
+.qtext .qh { padding-left: 3em; text-indent: -3em; margin-bottom: 1.4em; }
+.qtext .qh span { display: inline-block; width: 3em; text-indent: 0; }
+.qtext .sec { margin-left: -.5em; }
+.qtext .r { display: flex; }
+.qtext .r > b { flex: 0 0 auto; font-weight: normal; min-width: 4.6em; white-space: nowrap; }
+.qtext .r > div { flex: 1; min-width: 0; }
+.qtext .r.p > b { min-width: 2.6em; padding-left: .3em; }
+.qtext .r.q > b { min-width: 4.3em; margin-left: -1.5em; }
+.qtext .r.o > b { min-width: 2em; }
+.qtext .bk { display: inline-block; min-width: 6.2em; height: 1.45em; line-height: 1.3em; border: 2px solid #000; text-align: center; margin: 0 .15em; vertical-align: -.25em; text-indent: 0; letter-spacing: 0; }
+.qtext u { text-decoration-thickness: 1px; text-underline-offset: .3em; }
+.qtext ruby rt { font-size: .5em; letter-spacing: 0; }
+.qtext .fig { text-align: center; margin: 1.6em 0 1.2em; text-indent: 0; }
+.qtext .fig img { display: inline-block; max-width: 100%; height: auto; }
+.qtext .cap { margin-top: .4em; }
+.qtext .ag { margin-top: .2em; }
+.qtext .opts { display: grid; padding-left: 1em; text-indent: 0; }
+.qtext .opts.c4 { grid-template-columns: repeat(4, max-content); column-gap: 1.6em; justify-content: start; }
+.qtext .opts > span { white-space: nowrap; }
+.qtext .opts.c3 { grid-template-columns: repeat(3, 1fr); }
+.qtext .opts.c2 { grid-template-columns: repeat(2, 1fr); }
+.qtext .opts.c1 { grid-template-columns: 1fr; }
+.qtext .pno { position: absolute; left: 0; right: 0; bottom: 28px; text-align: center; }
+.qtext table { border-collapse: collapse; margin: .6em auto; line-height: 1.6; }
+.qtext td, .qtext th { border: 1px solid #000; padding: .1em .5em; font-weight: normal; vertical-align: top; }
 </style>
