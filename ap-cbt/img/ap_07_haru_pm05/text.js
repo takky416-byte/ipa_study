@@ -53,7 +53,7 @@ window.CBT_TEXT["ap_07_haru_pm05"] = [
 '<div class="r p"><b>(1)</b><div>本文中の下線①について，C さんが判断した理由を 35 字以内で答えよ。</div></div>' +
 '<div class="r p"><b>(2)</b><div>本文中の<span class="bk">a</span>に入れる適切な IP アドレスを答えよ。</div></div>' +
 '<div class="r p"><b>(3)</b><div>本文中の下線②について，サブネットに分割した結果，社内 LAN 上の PC からプリンタに届かなくなる通信の種類を解答群の中から選び，記号で答えよ。' +
-'<div class="ag">解答群</div><div class="opts c2"><span>ア　FTP</span><span>イ　ICMP</span><span>ウ　ブロードキャスト</span><span>エ　ユニキャスト</span></div></div></div>',
+'<div class="ag">解答群</div><div class="opts c2"><span>ア　FTP</span><span>イ　ICMP</span><span>ウ　ブロードキャスト</span><span>エ　ユニキャスト</span></div></div></div></div></div>',
 
 '<div class="r q"><b style="visibility:hidden">設問 1</b><div>' +
 '<div class="r p"><b>(4)</b><div>本文中の<span class="bk">b</span>に入れる適切な字句を解答群の中から選び，記号で答えよ。' +
