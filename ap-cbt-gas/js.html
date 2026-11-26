@@ -1,0 +1,996 @@
+<script>
+/*
+ * 応用情報技術者試験 科目B CBT模擬試験（GAS版・学生画面）
+ * 画面構成・操作は CBT-Solutions 公開の「科目B群 試験当日の試験アプリ 操作方法のご案内」に合わせている。
+ * 解答は端末にも控えを残しつつ、一定間隔でサーバー（受験記録シート）に保存する。
+ */
+(function () {
+  "use strict";
+
+  // ======================================================================
+  // ユーティリティ
+  // ======================================================================
+  function $(sel, r) { return (r || document).querySelector(sel); }
+  function el(tag, attrs, children) {
+    var e = document.createElement(tag);
+    if (attrs) for (var k in attrs) {
+      var v = attrs[k];
+      if (v == null || v === false) continue;
+      if (k === "class") e.className = v;
+      else if (k === "text") e.textContent = v;
+      else if (k === "html") e.innerHTML = v;
+      else if (k.slice(0, 2) === "on") e.addEventListener(k.slice(2), v);
+      else if (k === "style") e.style.cssText = v;
+      else e.setAttribute(k, v === true ? "" : v);
+    }
+    (children || []).forEach(function (c) {
+      if (c == null || c === false) return;
+      e.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+    });
+    return e;
+  }
+  function store(key, val) {
+    try {
+      if (val === undefined) { var s = localStorage.getItem(key); return s ? JSON.parse(s) : null; }
+      if (val === null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(val));
+    } catch (e) { return null; }
+  }
+  function chars(s) { return Array.from(s || "").length; }
+  function cut(s, n) { return Array.from(s || "").slice(0, n).join(""); }
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function toHalf(s) { return String(s || "").replace(/[０-９Ａ-Ｚａ-ｚ（）]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }); }
+
+  /** google.script.run を Promise で呼ぶ */
+  function api(name) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+      r[name].apply(r, args);
+    });
+  }
+
+  var root = document.getElementById("root");
+  var PORTAL = null;            // getPortalData の結果
+  var EXAM = null, PROBS = [], SESSION = null, STUDENT = null;
+  var S = null;                 // 受験中の状態 { selected, answers, flags, memo, cur, leaveCount }
+  var clockOffset = 0;          // サーバー時刻 - 端末時刻
+  var clip = "";
+
+  // ======================================================================
+  // 小問マスタ → CBT の解答欄
+  // ======================================================================
+  function splitLabel(s) {
+    s = toHalf(s).trim();
+    var m = s.match(/^(設問\s*\d+\s*(?:\(\d+\))?)\s*(.*)$/);
+    if (!m) return { label: s, key: "" };
+    return { label: m[1].replace(/\s+/g, ""), key: m[2].trim() };
+  }
+  function toField(sq, key) {
+    var t = sq.type, lim = String(sq.limit || "").trim();
+    var f = { sid: sq.sub_q_id, key: key };
+    if (t === "選択") {
+      f.type = key ? "pulldown" : "choice";
+      f.options = lim ? lim.split(/[,，、]/).map(function (x) { return x.trim(); }).filter(String) : ["ア", "イ", "ウ", "エ"];
+    } else if (t === "多答") {
+      f.type = "multi";
+      var m = lim.match(/^(\d+)\s*[:：]\s*(.*)$/);
+      if (m) { f.limit = parseInt(m[1], 10); lim = m[2]; }
+      f.options = lim ? lim.split(/[,，、]/).map(function (x) { return x.trim(); }).filter(String) : ["ア", "イ", "ウ", "エ"];
+    } else if (t === "図表") {
+      f.type = "none";
+      f.text = "（図表で解答する設問のため、解答入力欄はありません）";
+    } else if (t === "記述" && /^[（(]/.test(lim)) {
+      f.type = "none";
+      f.text = lim;
+    } else {
+      var n = parseInt(toHalf(lim), 10) || 0;
+      if (t === "記述" && n > 15) { f.type = "text"; f.max = n; }
+      else { f.type = "line"; f.max = n || 60; }
+    }
+    return f;
+  }
+  function buildProblems(exam) {
+    var man = window.CBT_IMG_MANIFEST || {};
+    var base = (PORTAL && PORTAL.imageBase) || "";
+    return exam.questions.map(function (q, i) {
+      var items = [], byLabel = {};
+      q.subQuestions.forEach(function (sq) {
+        var p = splitLabel(sq.sub_q_number);
+        var it = byLabel[p.label];
+        if (!it) { it = byLabel[p.label] = { label: p.label, fields: [] }; items.push(it); }
+        it.fields.push(toField(sq, p.key));
+      });
+      var n = man[q.questionId] || 0, pages = null;
+      if (n && base) { pages = []; for (var k = 1; k <= n; k++) pages.push(base + q.questionId + "/" + k + ".png"); }
+      return { idx: i, qid: q.questionId, label: q.qNumber, title: q.category || "", theme: q.theme || "",
+        source: q.source || "", required: q.required, pdfId: q.pdfId, pages: pages, items: items };
+    });
+  }
+  function referencePages() {
+    var man = window.CBT_IMG_MANIFEST || {}, base = (PORTAL && PORTAL.imageBase) || "";
+    for (var i = 0; i < PROBS.length; i++) {
+      var id = PROBS[i].qid.replace(/_pm\d+$/, "_ref");
+      if (man[id] && base) { var a = []; for (var k = 1; k <= man[id]; k++) a.push(base + id + "/" + k + ".png"); return a; }
+    }
+    return null;
+  }
+  function loadManifest(cb) {
+    if (!PORTAL.imageBase || window.CBT_IMG_MANIFEST) { cb(); return; }
+    var s = document.createElement("script");
+    s.src = PORTAL.imageBase + "manifest.js";
+    s.onload = cb; s.onerror = cb;
+    document.head.appendChild(s);
+  }
+
+  // ======================================================================
+  // キー操作によるコピー・貼り付けの禁止（本番仕様）
+  // ======================================================================
+  function inExam() { return document.body.classList.contains("in-exam"); }
+  ["copy", "cut", "paste", "drop", "dragstart", "contextmenu"].forEach(function (t) {
+    document.addEventListener(t, function (e) { if (inExam()) e.preventDefault(); }, true);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (!inExam()) return;
+    var k = (e.key || "").toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && ["c", "x", "v", "p", "s", "f", "u", "a"].indexOf(k) >= 0 && !(k === "a" && /^(INPUT|TEXTAREA)$/.test(e.target.tagName))) e.preventDefault();
+    if (k === "f5" || k === "f12" || ((e.ctrlKey || e.metaKey) && k === "r")) e.preventDefault();
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && ["i", "j", "c"].indexOf(k) >= 0) e.preventDefault();
+  }, true);
+  window.addEventListener("beforeunload", function (e) { if (inExam()) { e.preventDefault(); e.returnValue = ""; } });
+
+  // 画面離脱（別のタブ・ウィンドウへの切り替え、全画面の解除）を数える
+  document.addEventListener("visibilitychange", function () { if (inExam() && document.hidden) noteLeave(); });
+  document.addEventListener("fullscreenchange", function () { if (inExam() && !document.fullscreenElement) noteLeave(); });
+  var lastLeave = 0;
+  function noteLeave() {
+    if (Date.now() - lastLeave < 1500) return;
+    lastLeave = Date.now();
+    S.leaveCount = (S.leaveCount || 0) + 1;
+    markDirty();
+  }
+
+  // ======================================================================
+  // 画面: 試験一覧（ポータル）
+  // ======================================================================
+  function boot() {
+    root.innerHTML = '<div class="loading">読み込み中...</div>';
+    api("getPortalData").then(function (d) {
+      PORTAL = d;
+      loadManifest(renderPortal);
+    }).catch(function (err) {
+      root.innerHTML = "";
+      root.appendChild(el("div", { class: "loading", text: "読み込みに失敗しました。ページを再読み込みしてください。（" + err + "）" }));
+    });
+  }
+
+  var manualInputs = null;
+  function renderPortal() {
+    document.body.classList.remove("in-exam");
+    document.documentElement.classList.remove("inverted");
+    root.innerHTML = "";
+    var st = PORTAL.student;
+    var profile;
+    if (st) {
+      profile = el("div", { class: "profile-box" }, ["受験者：", el("b", { text: st.studentClass + "-" + st.studentNum + "　" + st.studentName }), "　（" + PORTAL.email + "）"]);
+      manualInputs = null;
+    } else {
+      var cls = el("input", { type: "text", placeholder: "クラス（例：SF1）", style: "width:140px" });
+      var num = el("input", { type: "text", placeholder: "番号", style: "width:70px", inputmode: "numeric" });
+      var nm = el("input", { type: "text", placeholder: "氏名", style: "width:200px" });
+      manualInputs = { cls: cls, num: num, nm: nm };
+      profile = el("div", { class: "profile-box" }, [
+        el("div", { style: "margin-bottom:6px;color:#b00", text: "名簿にアカウント（" + (PORTAL.email || "不明") + "）が見つかりません。クラス・番号・氏名を入力してください。" }),
+        cls, num, nm
+      ]);
+    }
+    var rows = PORTAL.exams.map(function (e) {
+      var tagCls = e.status === "受験中" ? "doing" : e.status === "提出済み" ? "done" : "";
+      var btn;
+      if (e.status === "提出済み") {
+        btn = e.canReview ? el("button", { class: "btn", text: "解答例を見る", onclick: function () { openReview(e.examId); } }) : el("span", { text: "提出済み" });
+      } else {
+        btn = el("button", { class: "btn navy", text: e.status === "受験中" ? "受験を再開" : "受験する", onclick: function () { confirmStart(e); } });
+      }
+      return el("tr", null, [
+        el("td", null, [e.examName, el("span", { class: "kind-tag" + (e.kind === "考査" ? " kousa" : ""), text: e.kind })]),
+        el("td", { text: e.duration + "分" }),
+        el("td", null, [el("span", { class: "status-tag " + tagCls, text: e.status })]),
+        el("td", { class: "take" }, [btn])
+      ]);
+    });
+    root.appendChild(el("div", { class: "top-wrap" }, [
+      el("div", { class: "top-head" }, [
+        el("div", null, [el("h1", { text: "試験一覧" }), el("div", { class: "sub", text: "応用情報技術者試験 科目B CBT模擬試験（非公式）" })]),
+        el("div", { class: "sub", text: PORTAL.email || "" })
+      ]),
+      el("div", { class: "top-main" }, [
+        el("div", { class: "notice" }, [
+          el("h2", { text: "注意事項" }),
+          el("ul", null, [
+            el("li", { text: "「受験する」を押すと全画面表示になり、試験が始まります。残り時間はサーバーで管理されます。" }),
+            el("li", { text: "解答は自動で保存されます。通信が切れたりページを閉じたりしても、「受験を再開」で続きから受験できます（残り時間は進みます）。" }),
+            el("li", { text: "試験中は、キー操作によるコピー・貼り付けはできません（解答欄・メモのボタンを使います）。" }),
+            el("li", { text: "試験中に別のタブ・ウィンドウへ切り替えたり全画面を解除したりすると、回数が記録されます。" }),
+            el("li", { text: "残り時間が0になると、解答は自動的に提出されます。" })
+          ])
+        ]),
+        profile,
+        PORTAL.exams.length ? el("table", { class: "exam-table" }, [
+          el("tr", null, [el("th", { text: "試験名" }), el("th", { text: "試験時間" }), el("th", { text: "状況" }), el("th", { class: "take", text: "" })])
+        ].concat(rows)) : el("p", { text: "現在受験できる試験はありません。" }),
+        el("div", { class: "top-foot", text: "画面の構成・操作は、CBT-Solutions が公開している「科目B群 試験当日の試験アプリ 操作方法のご案内」に合わせています。実際の試験画面とは異なる場合があります。" })
+      ])
+    ]));
+  }
+
+  function manualProfile() {
+    if (!manualInputs) return null;
+    return { studentClass: manualInputs.cls.value.trim(), studentNum: manualInputs.num.value.trim(), studentName: manualInputs.nm.value.trim() };
+  }
+
+  function confirmStart(e) {
+    var mp = manualProfile();
+    if (manualInputs && (!mp.studentClass || !mp.studentNum || !mp.studentName)) { dialog("入力エラー", "クラス・番号・氏名をすべて入力してください。", null); return; }
+    var who = PORTAL.student ? PORTAL.student.studentClass + "-" + PORTAL.student.studentNum + " " + PORTAL.student.studentName : mp.studentClass + "-" + mp.studentNum + " " + mp.studentName;
+    dialog("開始確認", (e.status === "受験中" ? "受験を再開します。" : "試験を開始します。") + "\n受験者：" + who + "\n試験：" + e.examName, function () {
+      requestFullscreen();
+      overlay("試験を準備しています...");
+      api("startExam", e.examId, mp).then(function (r) {
+        overlay(null);
+        if (r.needProfile) { dialog("入力エラー", "名簿にアカウントが見つかりません。クラス・番号・氏名を入力してください。", null); return; }
+        if (r.alreadySubmitted) { dialog("確認", "この試験はすでに提出済みです。", null); boot(); return; }
+        EXAM = r.exam; SESSION = r.session; STUDENT = r.student;
+        clockOffset = r.serverNow - Date.now();
+        PROBS = buildProblems(EXAM);
+        var local = store("apcbt-gas:" + SESSION.id);
+        var d = SESSION.data || {};
+        S = {
+          selected: SESSION.selected && SESSION.selected.length ? SESSION.selected : PROBS.filter(function (p) { return p.required; }).map(function (p) { return p.qid; }),
+          answers: d.answers || {}, flags: d.flags || {}, memo: d.memo || "", cur: 0, leaveCount: 0
+        };
+        // 端末側の控えの方が新しければそちらを使う（保存前に通信が切れた場合）
+        if (local && local.savedAt > (SESSION.savedAt || 0) && local.answers) {
+          S.answers = local.answers; S.flags = local.flags || S.flags; S.memo = local.memo || S.memo; S.selected = local.selected || S.selected;
+        }
+        if (local) { S.leaveCount = local.leaveCount || 0; S.cur = local.cur || 0; }
+        renderExam(!(SESSION.selected && SESSION.selected.length));
+      }).catch(function (err) { overlay(null); dialog("エラー", String(err.message || err), null); });
+    }, true);
+  }
+
+  function requestFullscreen() {
+    var d = document.documentElement;
+    try { (d.requestFullscreen || d.webkitRequestFullscreen || function () {}).call(d); } catch (e) { /* noop */ }
+  }
+  function overlay(msg) {
+    var o = $(".overlay-msg");
+    if (!msg) { if (o) o.remove(); return; }
+    if (!o) { o = el("div", { class: "overlay-msg" }); document.body.appendChild(o); }
+    o.textContent = msg;
+  }
+
+  // ======================================================================
+  // 自動保存
+  // ======================================================================
+  var dirty = false, saving = false, saveTimer = 0, saveStateEl = null, lastOk = 0;
+  function payload() {
+    return JSON.stringify({ selected: S.selected, answers: S.answers, flags: S.flags, memo: S.memo, leaveCount: S.leaveCount || 0 });
+  }
+  function markDirty() {
+    dirty = true;
+    var copy = JSON.parse(payload()); copy.savedAt = Date.now() + clockOffset; copy.cur = S.cur;
+    store("apcbt-gas:" + SESSION.id, copy);
+  }
+  function save(force) {
+    if (saving) return;
+    if (!dirty && !force) {   // 変更がなくても、終了時刻（延長など）と状態だけは確認する
+      api("pingSession", SESSION.id).then(applyServerState).catch(function () {});
+      return;
+    }
+    saving = true; dirty = false;
+    api("saveProgress", SESSION.id, payload()).then(function (r) {
+      saving = false; lastOk = Date.now();
+      setSaveState("保存済み " + new Date().toTimeString().slice(0, 5), false);
+      applyServerState(r);
+    }).catch(function () {
+      saving = false; dirty = true;
+      setSaveState("保存できていません（通信を確認してください）", true);
+    });
+  }
+  function applyServerState(r) {
+    if (!inExam()) return;
+    SESSION.endAt = r.endAt; clockOffset = r.serverNow - Date.now();
+    if (r.status === "時間切れ") finishExam(true);
+    else if (r.status === "提出済み") showFinished({ status: "提出済み" });
+  }
+  function setSaveState(t, ng) { if (saveStateEl) { saveStateEl.textContent = t; saveStateEl.classList.toggle("ng", !!ng); } }
+
+  // ======================================================================
+  // 画面: 試験
+  // ======================================================================
+  var timerId = 0, focusedItem = null, leftView, rightView, statusOpen = false, popupState = null;
+  function iid(pi, ii) { return PROBS[pi].qid + "#" + ii; }
+  function isFilled(v) { return Array.isArray(v) ? v.length > 0 : (v != null && String(v).trim() !== ""); }
+  function itemAnswered(pi, ii) {
+    return PROBS[pi].items[ii].fields.every(function (f) { return f.type === "none" || isFilled(S.answers[f.sid]); });
+  }
+
+  function renderExam(openSelect) {
+    document.body.classList.add("in-exam");
+    root.innerHTML = "";
+    statusOpen = false;
+    var remainEl = el("span", { class: "remain" });
+    var pageInfo = el("div", { class: "t2" });
+    var invSw = el("div", { class: "switch", onclick: function () {
+      invSw.classList.toggle("on");
+      document.documentElement.classList.toggle("inverted", invSw.classList.contains("on"));
+    } });
+    saveStateEl = el("span", { class: "save-state" });
+    var ref = referencePages();
+    var head = el("div", { class: "exam-head" }, [
+      el("div", { class: "logo", text: "CBT" }),
+      el("div", { class: "head-title" }, [el("div", { class: "t1", text: EXAM.examName }), pageInfo]),
+      el("div", { class: "head-right" }, [
+        el("div", { style: "display:flex;align-items:center" }, [saveStateEl, remainEl]),
+        el("div", { class: "head-btns" }, [
+          el("div", { class: "invert-sw" }, [el("span", { text: "白黒反転" }), invSw]),
+          el("button", { class: "btn navy", text: "問題選択", onclick: openSelectDialog }),
+          el("button", { class: "btn navy", id: "memoBtn", text: "メモ", onclick: toggleMemo }),
+          el("button", { class: "btn blue", text: ref ? "参考資料" : "注意事項", onclick: openReference }),
+          el("button", { class: "btn navy", text: "試験終了", onclick: confirmEnd })
+        ])
+      ])
+    ]);
+    leftView = buildProblemViewer();
+    var left = el("div", { class: "pane pane-left" }, [leftView.toolbar, leftView.scroll]);
+    var splitter = el("div", { class: "splitter" });
+    rightView = el("div", { class: "answer" });
+    var right = el("div", { class: "pane pane-right" }, [rightView]);
+    var body = el("div", { class: "exam-body" }, [left, splitter, right]);
+    var prevBtn = el("button", { class: "btn navy", text: "前の問題", onclick: function () { go(S.cur - 1); } });
+    var nextBtn = el("button", { class: "btn navy", text: "次の問題", onclick: function () { go(S.cur + 1); } });
+    var foot = el("div", { class: "exam-foot" }, [
+      el("button", { class: "btn navy", text: "解答状況", onclick: toggleStatus }),
+      el("button", { class: "btn", id: "calcBtn", text: "電卓", onclick: toggleCalc }),
+      el("button", { class: "btn green", text: "問題（別画面）", onclick: togglePopup }),
+      el("div", { class: "sp" }),
+      el("button", { class: "btn", text: "後で見直す", onclick: flagAll }),
+      prevBtn, nextBtn
+    ]);
+    root.appendChild(el("div", { class: "exam" }, [head, body, foot]));
+
+    splitter.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      splitter.setPointerCapture(e.pointerId);
+      var rect = body.getBoundingClientRect();
+      function mv(ev) {
+        var r = Math.max(0.25, Math.min(0.8, (ev.clientX - rect.left) / rect.width));
+        left.style.flexBasis = (r * 100) + "%";
+        leftView.relayout();
+      }
+      function up() { splitter.removeEventListener("pointermove", mv); splitter.removeEventListener("pointerup", up); }
+      splitter.addEventListener("pointermove", mv);
+      splitter.addEventListener("pointerup", up);
+    });
+    window.addEventListener("resize", function () { if (leftView) leftView.relayout(); });
+
+    function go(i) {
+      if (i < 0 || i >= PROBS.length) return;
+      S.cur = i; markDirty();
+      if (statusOpen) toggleStatus();
+      showProblem();
+    }
+    function showProblem() {
+      prevBtn.disabled = S.cur <= 0;
+      nextBtn.disabled = S.cur >= PROBS.length - 1;
+      pageInfo.textContent = PROBS.length + "ページ中" + (S.cur + 1) + "ページ目";
+      leftView.show(S.cur);
+      renderAnswers();
+      if (popupState) popupState.viewer.show(S.cur);
+    }
+    renderExam.go = go;
+
+    function tick() {
+      var ms = SESSION.endAt - (Date.now() + clockOffset);
+      if (ms <= 0) { remainEl.textContent = "残り時間 0:00"; finishExam(true); return; }
+      var sec = Math.ceil(ms / 1000);
+      remainEl.textContent = "残り時間 " + Math.floor(sec / 60) + ":" + pad2(sec % 60);
+      remainEl.classList.toggle("warn", sec <= 300);
+    }
+    clearInterval(timerId); timerId = setInterval(tick, 500); tick();
+    clearInterval(saveTimer); saveTimer = setInterval(function () { save(Date.now() - lastOk > 120000); }, (PORTAL.autosaveSec || 30) * 1000);
+    if (S.cur >= PROBS.length) S.cur = 0;
+    showProblem();
+    if (openSelect) openSelectDialog();
+  }
+
+  // ---------------------------------------------------------------------
+  // 問題文ビューア（拡大縮小・マーカー）。画像がない大問はドライブのPDFを表示する
+  // ---------------------------------------------------------------------
+  function buildProblemViewer() {
+    var v = { zoom: 100, tool: "pointer", size: 1.0, cache: {}, cur: -1 };
+    var pct = el("span", { class: "pct", text: "100 %" });
+    var zr = el("input", { type: "range", min: 50, max: 200, step: 10, value: 100 });
+    zr.addEventListener("input", function () { v.zoom = +zr.value; pct.textContent = v.zoom + " %"; v.relayout(); });
+    var sizeTxt = el("span", { text: "1.0x" });
+    var sr = el("input", { type: "range", min: 5, max: 30, step: 1, value: 10, style: "width:60px" });
+    sr.addEventListener("input", function () { v.size = sr.value / 10; sizeTxt.textContent = v.size.toFixed(1) + "x"; });
+    var tools = {};
+    function toolBtn(name, inner, title) {
+      var b = el("button", { class: "tool" + (name === "pointer" ? " sel" : ""), title: title, onclick: function () {
+        v.tool = name;
+        Object.keys(tools).forEach(function (k) { tools[k].classList.toggle("sel", k === name); });
+        scroll.classList.toggle("marking", name !== "pointer");
+        scroll.classList.toggle("erasing", name === "eraser");
+      } }, [inner]);
+      tools[name] = b; return b;
+    }
+    var ptrSvg = '<svg viewBox="0 0 12 12"><path d="M2 1 L2 10 L4.5 7.6 L6.3 11 L7.6 10.4 L5.9 7 L9.2 7 Z" fill="#222"/></svg>';
+    var ersSvg = '<svg viewBox="0 0 12 12"><path d="M7.5 1.5 L10.5 4.5 L5 10 L2 10 L1 9 L1 8 Z" fill="#fff" stroke="#333"/><path d="M4 5 L7 8" stroke="#333"/></svg>';
+    var toolbar = el("div", { class: "toolbar" }, [
+      el("span", { text: "拡大・縮小" }), zr, pct,
+      toolBtn("pointer", el("span", { html: ptrSvg }), "マーカーモードのオフ"),
+      toolBtn("red", el("i", { style: "background:#e21b1b" }), "赤"),
+      toolBtn("blue", el("i", { style: "background:#1336d6" }), "青"),
+      toolBtn("yellow", el("i", { style: "background:#ffe600" }), "黄"),
+      toolBtn("eraser", el("span", { html: ersSvg }), "消しゴム"),
+      el("span", { text: "サイズ" }), sr, sizeTxt,
+      el("button", { class: "btn navy tb-clear", text: "クリア", onclick: function () {
+        var c = v.cache[v.cur]; if (!c) return;
+        c.canvases.forEach(function (cv) { cv.getContext("2d").clearRect(0, 0, cv.width, cv.height); });
+      } })
+    ]);
+    var scroll = el("div", { class: "scroll" });
+    v.toolbar = toolbar; v.scroll = scroll;
+    var COLORS = { red: "rgba(226,27,27,0.38)", blue: "rgba(19,54,214,0.32)", yellow: "rgba(255,230,0,0.45)" };
+    function attachDraw(cv) {
+      var drawing = false, last = null, base = null, pts = [];
+      function pos(e) { var r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height }; }
+      function redraw(ctx) {
+        ctx.putImageData(base, 0, 0);
+        ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.strokeStyle = COLORS[v.tool]; ctx.lineWidth = 16 * v.size;
+        ctx.beginPath();
+        pts.forEach(function (p, i) { if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+        if (pts.length === 1) ctx.lineTo(pts[0].x + 0.1, pts[0].y);
+        ctx.stroke(); ctx.restore();
+      }
+      function erase(ctx, a, b) {
+        ctx.save(); ctx.globalCompositeOperation = "destination-out"; ctx.lineCap = "round"; ctx.lineWidth = 26 * v.size;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x + 0.1, b.y); ctx.stroke(); ctx.restore();
+      }
+      cv.addEventListener("pointerdown", function (e) {
+        if (v.tool === "pointer") return;
+        e.preventDefault(); cv.setPointerCapture(e.pointerId);
+        drawing = true; last = pos(e);
+        var ctx = cv.getContext("2d");
+        if (v.tool !== "eraser") { base = ctx.getImageData(0, 0, cv.width, cv.height); pts = [last]; redraw(ctx); } else erase(ctx, last, last);
+      });
+      cv.addEventListener("pointermove", function (e) {
+        if (!drawing) return;
+        var p = pos(e), ctx = cv.getContext("2d");
+        if (v.tool === "eraser") erase(ctx, last, p); else { pts.push(p); redraw(ctx); }
+        last = p;
+      });
+      function end() { drawing = false; base = null; pts = []; }
+      cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
+    }
+    v.show = function (pi) {
+      if (v.cur === pi) return;
+      Object.keys(v.cache).forEach(function (k) { v.cache[k].wrap.style.display = "none"; });
+      v.cur = pi;
+      var P = PROBS[pi];
+      if (!v.cache[pi]) {
+        var wrap, canvases = [];
+        if (P.pages) {
+          wrap = el("div", { class: "pages" });
+          P.pages.forEach(function (src) {
+            var cv = el("canvas", { width: 1074, height: 1520 });
+            var im = el("img", { src: src, alt: "", draggable: "false" });
+            im.addEventListener("load", function () {
+              if (im.naturalWidth && (cv.width !== im.naturalWidth || cv.height !== im.naturalHeight)) { cv.width = im.naturalWidth; cv.height = im.naturalHeight; }
+            });
+            attachDraw(cv); canvases.push(cv);
+            wrap.appendChild(el("div", { class: "page" }, [im, cv]));
+          });
+        } else {
+          // 画像がまだ用意されていない大問（以前のシステムと同じくドライブのPDFを表示。マーカーは使えない）
+          wrap = el("div", { class: "pdf-frame-wrap", style: "height:100%" }, [
+            el("iframe", { src: P.pdfId ? "https://drive.google.com/file/d/" + P.pdfId + "/preview" : "about:blank" }),
+            el("div", { class: "pdf-guard" })
+          ]);
+        }
+        scroll.appendChild(wrap);
+        v.cache[pi] = { wrap: wrap, canvases: canvases, isPdf: !P.pages };
+      }
+      v.cache[pi].wrap.style.display = "";
+      toolbar.style.visibility = v.cache[pi].isPdf ? "hidden" : "";
+      v.relayout(); scroll.scrollTop = 0;
+    };
+    v.relayout = function () {
+      var c = v.cache[v.cur]; if (!c || c.isPdf) return;
+      var w = Math.max(200, scroll.clientWidth - 24);
+      c.wrap.style.width = Math.round(w * v.zoom / 100) + "px";
+    };
+    return v;
+  }
+
+  // ---------------------------------------------------------------------
+  // 解答欄
+  // ---------------------------------------------------------------------
+  function renderAnswers() {
+    var pi = S.cur, P = PROBS[pi];
+    rightView.innerHTML = "";
+    if (S.selected.indexOf(P.qid) < 0) rightView.appendChild(el("p", { class: "not-selected", text: "画面右上の「問題選択」から問題番号を選択したか確認してください。" }));
+    rightView.appendChild(el("div", { style: "font-size:13px;margin:2px 0 6px;font-weight:bold", text: P.label + (P.required ? "（必須）" : "") }));
+    P.items.forEach(function (it, ii) {
+      var key = iid(pi, ii);
+      var flag = el("button", { class: "flag" + (S.flags[key] ? " on" : ""), title: "後で見直す", onclick: function () {
+        if (S.flags[key]) delete S.flags[key]; else S.flags[key] = true;
+        flag.classList.toggle("on", !!S.flags[key]); markDirty();
+      } });
+      var box = el("div", { class: "item", "data-item": key }, [flag, el("div", { class: "item-label", text: it.label })]);
+      it.fields.forEach(function (f) { box.appendChild(renderField(f)); });
+      box.addEventListener("focusin", function () { focusedItem = key; });
+      box.addEventListener("pointerdown", function () { focusedItem = key; });
+      rightView.appendChild(box);
+    });
+    rightView.scrollTop = 0;
+  }
+
+  function renderField(f) {
+    var id = f.sid, val = S.answers[id];
+    function setVal(v) { if (isFilled(v)) S.answers[id] = v; else delete S.answers[id]; markDirty(); }
+    var wrap = el("div", { class: "field" });
+    if (f.key) wrap.appendChild(el("div", { class: "field-key", text: f.key }));
+    if (f.type === "none") {
+      wrap.appendChild(el("div", { style: "background:#f4f4f4;padding:8px 10px;color:#666;font-size:12px;border-left:4px solid #ccc", text: f.text }));
+    } else if (f.type === "choice") {
+      var list = el("div", { class: "choice-list" });
+      f.options.forEach(function (o) {
+        list.appendChild(el("button", { class: "choice-btn" + (val === o ? " sel" : ""), text: o, onclick: function () {
+          var now = S.answers[id] === o ? "" : o;
+          setVal(now);
+          Array.prototype.forEach.call(list.children, function (c) { c.classList.toggle("sel", c.textContent === now); });
+        } }));
+      });
+      wrap.appendChild(list);
+    } else if (f.type === "multi") {
+      var ml = el("div", { class: "multi-list" });
+      if (f.limit) ml.appendChild(el("div", { style: "font-size:12px;color:#555", text: "※" + f.limit + "個選択" }));
+      f.options.forEach(function (o) {
+        var cb = el("input", { type: "checkbox", checked: Array.isArray(val) && val.indexOf(o) >= 0 });
+        cb.addEventListener("change", function () {
+          var cur = Array.isArray(S.answers[id]) ? S.answers[id].slice() : [];
+          if (cb.checked) {
+            if (f.limit && cur.length >= f.limit) { cb.checked = false; dialog("選択制限", "この設問は " + f.limit + " 個まで選択できます。", null); return; }
+            if (cur.indexOf(o) < 0) cur.push(o);
+          } else cur = cur.filter(function (x) { return x !== o; });
+          cur.sort(function (a, b) { return f.options.indexOf(a) - f.options.indexOf(b); });
+          setVal(cur);
+        });
+        ml.appendChild(el("label", null, [cb, o]));
+      });
+      wrap.appendChild(ml);
+    } else if (f.type === "pulldown") {
+      var sel = el("select", { class: "pull" }, [el("option", { value: "", text: "" })].concat(f.options.map(function (o) { return el("option", { value: o, text: o, selected: val === o }); })));
+      sel.addEventListener("change", function () { setVal(sel.value); });
+      wrap.appendChild(sel);
+    } else if (f.type === "line") {
+      var inp = el("input", { class: "line", type: "text", value: val || "", autocomplete: "off", spellcheck: "false" });
+      var composing = false;
+      function filter() { var v = inp.value; if (f.max) v = cut(v, f.max); if (v !== inp.value) inp.value = v; setVal(v); }
+      inp.addEventListener("compositionstart", function () { composing = true; });
+      inp.addEventListener("compositionend", function () { composing = false; filter(); });
+      inp.addEventListener("input", function () { if (!composing) filter(); });
+      inp.addEventListener("keydown", function (e) { if (e.key === "Enter") e.preventDefault(); });
+      wrap.appendChild(el("div", { class: "line-wrap" }, [inp]));
+    } else if (f.type === "text") {
+      wrap.appendChild(buildMultiBox(f, val, setVal));
+    }
+    return wrap;
+  }
+
+  function buildMultiBox(f, val, onChange) {
+    var ta = el("textarea", { class: "multi", spellcheck: "false" });
+    ta.value = val || "";
+    var lines = Math.max(2, Math.ceil((f.max || 30) / 25) + 1);
+    ta.style.minHeight = (lines * 24 + 10) + "px";
+    var count = el("div", { class: "mbox-foot" });
+    var composing = false;
+    function upd(fromInput) {
+      if (f.max && chars(ta.value) > f.max) {
+        var pos = ta.selectionStart; ta.value = cut(ta.value, f.max);
+        ta.selectionStart = ta.selectionEnd = Math.min(pos, ta.value.length);
+      }
+      count.textContent = chars(ta.value) + " / " + (f.max || "-") + " 文字";
+      if (fromInput) onChange(ta.value);
+    }
+    ta.addEventListener("compositionstart", function () { composing = true; });
+    ta.addEventListener("compositionend", function () { composing = false; upd(true); });
+    ta.addEventListener("input", function () { if (!composing) upd(true); });
+    upd(false);
+    var sb = buildSearchBar(function () { return ta; });
+    return el("div", { class: "mbox" }, [buildClipTools(ta, function () { upd(true); }, sb), sb.bar, ta, count]);
+  }
+
+  var ICON = {
+    search: '<svg width="11" height="11" viewBox="0 0 12 12"><circle cx="5" cy="5" r="3.6" fill="none" stroke="#222" stroke-width="1.6"/><path d="M7.7 7.7 L11 11" stroke="#222" stroke-width="1.8"/></svg>',
+    cut: '<svg width="11" height="11" viewBox="0 0 12 12"><circle cx="3" cy="9" r="2" fill="none" stroke="#222"/><circle cx="9" cy="9" r="2" fill="none" stroke="#222"/><path d="M4.3 7.6 L10 1 M7.7 7.6 L2 1" stroke="#222"/></svg>',
+    copy: '<svg width="11" height="11" viewBox="0 0 12 12"><rect x="1" y="3" width="7" height="8" fill="#fff" stroke="#222"/><rect x="4" y="1" width="7" height="8" fill="#fff" stroke="#222"/></svg>',
+    paste: '<svg width="11" height="11" viewBox="0 0 12 12"><rect x="1.5" y="2" width="8" height="9.5" fill="#222"/><rect x="3" y="1" width="5" height="2" fill="#fff" stroke="#222"/><rect x="5" y="5" width="6" height="6.5" fill="#fff" stroke="#222"/></svg>'
+  };
+  function nd(e) { e.preventDefault(); }
+  function buildClipTools(ta, after, sb) {
+    function sel() { return ta.value.substring(ta.selectionStart, ta.selectionEnd); }
+    function insert(text) {
+      var s = ta.selectionStart, e = ta.selectionEnd;
+      ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
+      ta.selectionStart = ta.selectionEnd = s + text.length; ta.focus(); after();
+    }
+    return el("div", { class: "mbox-tools" }, [
+      el("button", { html: ICON.search + " 検索", onmousedown: nd, onclick: function () { sb.toggle(); } }),
+      el("button", { html: ICON.cut + " カット", onmousedown: nd, onclick: function () { var t = sel(); if (t) { clip = t; insert(""); } } }),
+      el("button", { html: ICON.copy + " コピー", onmousedown: nd, onclick: function () { var t = sel(); if (t) clip = t; } }),
+      el("button", { html: ICON.paste + " ペースト", onmousedown: nd, onclick: function () { if (clip) insert(clip); } })
+    ]);
+  }
+  function buildSearchBar(getTa) {
+    var q = el("input", { type: "text", placeholder: "検索する文字" }), info = el("span"), idx = -1;
+    function find(dir) {
+      var ta = getTa(), s = q.value;
+      if (!s) { info.textContent = ""; return; }
+      var hits = [], i = -1;
+      while ((i = ta.value.indexOf(s, i + 1)) >= 0) hits.push(i);
+      if (!hits.length) { info.textContent = "0件"; return; }
+      idx = (idx + dir + hits.length) % hits.length;
+      ta.focus(); ta.setSelectionRange(hits[idx], hits[idx] + s.length);
+      info.textContent = (idx + 1) + "/" + hits.length;
+    }
+    q.addEventListener("input", function () { idx = -1; find(1); });
+    q.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); find(e.shiftKey ? -1 : 1); } });
+    var bar = el("div", { class: "searchbar" }, [q, info, el("button", { text: "▲", onclick: function () { find(-1); } }), el("button", { text: "▼", onclick: function () { find(1); } })]);
+    return { bar: bar, toggle: function () { bar.classList.toggle("show"); if (bar.classList.contains("show")) q.focus(); } };
+  }
+  function flagAll() {
+    var pi = S.cur;
+    PROBS[pi].items.forEach(function (it, ii) { S.flags[iid(pi, ii)] = true; });
+    markDirty(); renderAnswers();
+  }
+
+  // ---------------------------------------------------------------------
+  // 解答状況
+  // ---------------------------------------------------------------------
+  var statusEl = null;
+  function toggleStatus() {
+    if (statusOpen) { statusEl.remove(); statusOpen = false; return; }
+    statusOpen = true;
+    var rows = el("div", { class: "status-rows" });
+    PROBS.forEach(function (P, pi) {
+      var row = el("div", { class: "status-row" + (S.selected.indexOf(P.qid) < 0 ? " unsel" : "") });
+      P.items.forEach(function (it, ii) {
+        var key = iid(pi, ii);
+        var cls = "tile" + (itemAnswered(pi, ii) ? " answered" : "") + (S.flags[key] ? " flagged" : "") + (focusedItem === key ? " doing" : "");
+        row.appendChild(el("div", { class: cls, onclick: function () {
+          toggleStatus(); renderExam.go(pi);
+          var t = rightView.querySelector('[data-item="' + key + '"]');
+          if (t) { t.scrollIntoView({ block: "start" }); focusedItem = key; var f = t.querySelector("input,select,textarea,.choice-btn"); if (f) f.focus(); }
+        } }, [ii === 0 ? el("span", { class: "pno", text: P.label }) : null, it.label]));
+      });
+      rows.appendChild(row);
+    });
+    statusEl = el("div", { class: "status-view" }, [rows, el("div", { class: "legend" }, [
+      el("div", null, [el("span"), "未解答"]), el("div", null, [el("span", { class: "a" }), "解答済み"]),
+      el("div", null, [el("span", { class: "f" }), "後で見直すもの"]), el("div", null, [el("span", { class: "d" }), "解答中"])
+    ])]);
+    $(".exam").appendChild(statusEl);
+  }
+
+  // ---------------------------------------------------------------------
+  // フローティングウィンドウ
+  // ---------------------------------------------------------------------
+  function makeWin(opts) {
+    var title = el("div", { class: "win-title" }, opts.titleChildren);
+    var w = el("div", { class: "win" + (opts.resizable ? " resizable" : ""), style: opts.style || "" }, [title, opts.body].concat(opts.foot ? [opts.foot] : []));
+    title.addEventListener("pointerdown", function (e) {
+      if (e.target.closest("button,input,label")) return;
+      e.preventDefault();
+      var r = w.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+      title.setPointerCapture(e.pointerId);
+      function mv(ev) {
+        w.style.left = Math.max(0, Math.min(window.innerWidth - 60, ev.clientX - dx)) + "px";
+        w.style.top = Math.max(0, Math.min(window.innerHeight - 30, ev.clientY - dy)) + "px";
+      }
+      function up() { title.removeEventListener("pointermove", mv); title.removeEventListener("pointerup", up); }
+      title.addEventListener("pointermove", mv); title.addEventListener("pointerup", up);
+    });
+    document.body.appendChild(w);
+    return w;
+  }
+  function transToggle(getWin) {
+    var cb = el("input", { type: "checkbox" });
+    cb.addEventListener("change", function () { getWin().classList.toggle("trans", cb.checked); });
+    return el("label", null, [cb, "半透明"]);
+  }
+
+  // 問題選択
+  var selWin = null;
+  function openSelectDialog() {
+    if (selWin) return;
+    var pending = S.selected.slice();
+    var countEl = el("div", { class: "sel-count" }), msg = el("div", { class: "sel-msg" });
+    function upd() { countEl.textContent = "選択中：" + pending.length + " / " + EXAM.selectionLimit + " 問"; }
+    var list = PROBS.map(function (P) {
+      var cb = el("input", { type: "checkbox", checked: pending.indexOf(P.qid) >= 0, disabled: P.required });
+      cb.addEventListener("change", function () {
+        if (cb.checked) { if (pending.indexOf(P.qid) < 0) pending.push(P.qid); } else pending = pending.filter(function (n) { return n !== P.qid; });
+        msg.textContent = ""; upd();
+      });
+      return el("label", null, [cb, "問題" + P.label.replace(/^問/, "") + "　" + P.title + (P.required ? "（必須）" : "")]);
+    });
+    upd();
+    var body = el("div", { class: "sel-body" }, [
+      el("div", { text: "問題を選択して「選択」ボタンを押すことで選択した問題が決定されます。" }),
+      el("div", { text: "試験時間内は，選択する問題を何度でも変更できます。" }),
+      el("div", { class: "red", text: "「選択」が押されるまでは選択問題は反映されません。" }), countEl
+    ].concat(list).concat([msg]));
+    var foot = el("div", { class: "win-foot" }, [el("button", { class: "btn navy", text: "選択", onclick: function () {
+      if (pending.length > EXAM.selectionLimit) { msg.textContent = "選択できる問題数は " + EXAM.selectionLimit + " 問です。選択を見直してください。"; return; }
+      S.selected = PROBS.filter(function (P) { return pending.indexOf(P.qid) >= 0; }).map(function (P) { return P.qid; });
+      markDirty(); save(true);
+      selWin.remove(); selWin = null; renderAnswers();
+    } })]);
+    selWin = makeWin({ titleChildren: [transToggle(function () { return selWin; }), el("span", { class: "grow" })], body: body, foot: foot,
+      style: "left:calc(50% - 230px);top:120px;width:460px;height:" + Math.min(window.innerHeight - 140, 200 + PROBS.length * 27) + "px" });
+  }
+
+  // メモ
+  var memoWin = null, MEMO_MAX = 10000;
+  function toggleMemo() {
+    if (memoWin) { closeMemo(); return; }
+    var area = el("div", { class: "memo-area", contenteditable: "true", spellcheck: "false" });
+    area.innerHTML = S.memo || "";
+    var count = el("div", { class: "memo-count" }), lastGood = area.innerHTML, composing = false;
+    function upd() {
+      var n = chars(area.innerText.replace(/\n$/, ""));
+      if (n > MEMO_MAX) { area.innerHTML = lastGood; n = chars(area.innerText.replace(/\n$/, "")); }
+      lastGood = area.innerHTML;
+      count.textContent = n + " / " + MEMO_MAX.toLocaleString() + " 文字";
+      if (S.memo !== area.innerHTML) { S.memo = area.innerHTML; markDirty(); }
+    }
+    area.addEventListener("compositionstart", function () { composing = true; });
+    area.addEventListener("compositionend", function () { composing = false; upd(); });
+    area.addEventListener("input", function () { if (!composing) upd(); });
+    upd();
+    function mark(color) { area.focus(); try { document.execCommand("styleWithCSS", false, true); } catch (e) {} document.execCommand("hiliteColor", false, color); upd(); }
+    function selText() { var s = window.getSelection(); return s && area.contains(s.anchorNode) ? s.toString() : ""; }
+    var q = el("input", { type: "text", placeholder: "検索", style: "width:110px;height:18px;font-size:11px" }), hitInfo = el("span"), hitIdx = -1;
+    function find(dir) {
+      var s = q.value; if (!s) { hitInfo.textContent = ""; return; }
+      var walker = document.createTreeWalker(area, NodeFilter.SHOW_TEXT), nodes = [], text = "", n;
+      while ((n = walker.nextNode())) { nodes.push({ n: n, start: text.length }); text += n.nodeValue; }
+      var hits = [], i = -1;
+      while ((i = text.indexOf(s, i + 1)) >= 0) hits.push(i);
+      if (!hits.length) { hitInfo.textContent = "0件"; return; }
+      hitIdx = (hitIdx + dir + hits.length) % hits.length;
+      function locate(off) { for (var k = nodes.length - 1; k >= 0; k--) if (off >= nodes[k].start) return { node: nodes[k].n, off: off - nodes[k].start }; }
+      var a = locate(hits[hitIdx]), b = locate(hits[hitIdx] + s.length);
+      var r = document.createRange(); r.setStart(a.node, a.off); r.setEnd(b.node, b.off);
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      hitInfo.textContent = (hitIdx + 1) + "/" + hits.length;
+    }
+    q.addEventListener("input", function () { hitIdx = -1; find(1); });
+    q.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); find(e.shiftKey ? -1 : 1); } });
+    var tools = el("div", { class: "memo-tools" }, [
+      el("span", { html: ICON.search }), q, hitInfo,
+      el("button", { class: "txt", text: "▲", onclick: function () { find(-1); } }), el("button", { class: "txt", text: "▼", onclick: function () { find(1); } }),
+      el("span", { class: "sep" }),
+      el("button", { class: "clr", title: "赤", style: "background:#ff3b3b", onmousedown: nd, onclick: function () { mark("#ffb3b3"); } }),
+      el("button", { class: "clr", title: "青", style: "background:#2a52ff", onmousedown: nd, onclick: function () { mark("#b9c8ff"); } }),
+      el("button", { class: "clr", title: "黄", style: "background:#ffb300", onmousedown: nd, onclick: function () { mark("#fff176"); } }),
+      el("button", { class: "clr", title: "マーカーを消す", style: "background:#fff", onmousedown: nd, onclick: function () { mark("transparent"); } }),
+      el("span", { class: "sep" }),
+      el("button", { class: "txt", html: ICON.cut + " カット", onmousedown: nd, onclick: function () { var t = selText(); if (t) { clip = t; area.focus(); document.execCommand("delete"); upd(); } } }),
+      el("button", { class: "txt", html: ICON.copy + " コピー", onmousedown: nd, onclick: function () { var t = selText(); if (t) clip = t; } }),
+      el("button", { class: "txt", html: ICON.paste + " ペースト", onmousedown: nd, onclick: function () { if (clip) { area.focus(); document.execCommand("insertText", false, clip); upd(); } } })
+    ]);
+    var romaji = el("button", { class: "ime on", text: "ローマ字" }), kana = el("button", { class: "ime", text: "かな" });
+    [romaji, kana].forEach(function (b) { b.addEventListener("click", function () { romaji.classList.toggle("on", b === romaji); kana.classList.toggle("on", b === kana); }); });
+    memoWin = makeWin({
+      titleChildren: [transToggle(function () { return memoWin; }), el("span", { class: "grow" }), romaji, kana, el("button", { class: "x", text: "×", onclick: closeMemo })],
+      body: el("div", { class: "win-body" }, [tools, area, count]),
+      foot: el("div", { class: "win-foot" }, [el("button", { class: "btn navy", text: "閉じる", onclick: closeMemo })]),
+      resizable: true, style: "left:calc(50% - 330px);top:110px;width:660px;height:470px"
+    });
+    area.focus();
+  }
+  function closeMemo() { if (memoWin) { memoWin.remove(); memoWin = null; } }
+
+  // 電卓
+  var calcWin = null;
+  function toggleCalc() {
+    if (calcWin) { calcWin.remove(); calcWin = null; $("#calcBtn").classList.remove("on"); return; }
+    $("#calcBtn").classList.add("on");
+    var disp = el("div", { class: "calc-disp", text: "0" }), cur = "0", acc = null, op = null, fresh = true;
+    function show(s) { disp.textContent = s.length > 14 ? Number(s).toPrecision(10).replace(/\.?0+(e|$)/, "$1") : s; }
+    function calc(a, b, o) { var r = o === "+" ? a + b : o === "−" ? a - b : o === "×" ? a * b : (b === 0 ? NaN : a / b); return Math.round(r * 1e10) / 1e10; }
+    function press(k) {
+      if (/^[0-9]$/.test(k)) { cur = fresh || cur === "0" ? k : (cur.replace(/[-.]/g, "").length >= 12 ? cur : cur + k); fresh = false; }
+      else if (k === ".") { if (fresh) { cur = "0."; fresh = false; } else if (cur.indexOf(".") < 0) cur += "."; }
+      else if (k === "C") { cur = "0"; acc = null; op = null; fresh = true; }
+      else if (k === "CE") { cur = "0"; fresh = true; }
+      else if (k === "←") { if (!fresh) cur = cur.length > 1 ? cur.slice(0, -1) : "0"; }
+      else if (k === "±") { if (cur !== "0") cur = cur[0] === "-" ? cur.slice(1) : "-" + cur; }
+      else if (k === "=") { if (op != null && acc != null) { cur = String(calc(acc, parseFloat(cur), op)); acc = null; op = null; fresh = true; } }
+      else { if (op != null && acc != null && !fresh) cur = String(calc(acc, parseFloat(cur), op)); acc = parseFloat(cur); op = k; fresh = true; }
+      show(cur === "NaN" ? "エラー" : cur);
+    }
+    var keys = ["C", "CE", "←", "÷", "7", "8", "9", "×", "4", "5", "6", "−", "1", "2", "3", "+", "±", "0", ".", "="];
+    var grid = el("div", { class: "calc-keys" }, keys.map(function (k) { return el("button", { class: "÷×−+".indexOf(k) >= 0 ? "op" : k === "=" ? "eq" : "", text: k, onclick: function () { press(k); } }); }));
+    var SIZES = { 小: [220, 260, 12], 中: [280, 330, 14], 大: [360, 420, 17] }, szBtns = {};
+    function setSize(s) {
+      calcWin.style.width = SIZES[s][0] + "px"; calcWin.style.height = SIZES[s][1] + "px";
+      calcWin.querySelector(".calc").style.fontSize = SIZES[s][2] + "px";
+      Object.keys(szBtns).forEach(function (k) { szBtns[k].classList.toggle("on", k === s); });
+    }
+    ["小", "中", "大"].forEach(function (s) { szBtns[s] = el("button", { class: "sz", text: s, onclick: function () { setSize(s); } }); });
+    calcWin = makeWin({ titleChildren: [el("span", { text: "電卓" }), el("span", { class: "grow" }), szBtns["小"], szBtns["中"], szBtns["大"], el("button", { class: "x", text: "×", onclick: toggleCalc })],
+      body: el("div", { class: "calc" }, [disp, grid]), style: "left:" + (window.innerWidth - 330) + "px;top:120px" });
+    setSize("中");
+  }
+
+  // 問題（別画面）
+  function togglePopup() {
+    if (popupState) { popupState.win.remove(); popupState = null; return; }
+    var viewer = buildProblemViewer(), big = el("button", { class: "sz", text: "大" }), std = el("button", { class: "sz on", text: "標準" }), win;
+    function setSize(isBig) {
+      big.classList.toggle("on", isBig); std.classList.toggle("on", !isBig);
+      if (isBig) { win.style.width = Math.round(window.innerWidth * 0.9) + "px"; win.style.height = Math.round(window.innerHeight * 0.86) + "px"; win.style.left = "5%"; win.style.top = "6%"; }
+      else { win.style.width = Math.round(window.innerWidth * 0.55) + "px"; win.style.height = Math.round(window.innerHeight * 0.7) + "px"; }
+      viewer.relayout();
+    }
+    big.addEventListener("click", function () { setSize(true); }); std.addEventListener("click", function () { setSize(false); });
+    win = makeWin({ titleChildren: [el("span", { text: "問題（別画面）" }), el("span", { class: "grow" }), big, std, el("button", { class: "x", text: "×", onclick: togglePopup })],
+      body: el("div", { class: "win-body" }, [viewer.toolbar, viewer.scroll]),
+      foot: el("div", { class: "win-foot" }, [el("button", { class: "btn navy", text: "閉じる", onclick: togglePopup })]),
+      resizable: true, style: "left:8%;top:12%" });
+    popupState = { win: win, viewer: viewer };
+    setSize(false); viewer.show(S.cur);
+    if (window.ResizeObserver) new ResizeObserver(function () { viewer.relayout(); }).observe(win);
+  }
+
+  // 参考資料・注意事項
+  var refWin = null;
+  function openReference() {
+    if (refWin) return;
+    var content = el("div", { class: "ref-content" }), refPages = referencePages(), refZoom = 100;
+    var tabsDef = [["注意事項", function () {
+      return [el("h3", { text: "試験中の注意事項" }), el("ul", null, [
+        el("li", { text: "試験時間は " + EXAM.duration + " 分です。残り時間は画面右上に表示されます。" }),
+        el("li", { text: "解答する問題は「問題選択」で選び、必ず「選択」ボタンを押してください。必須問題は最初から選択されています。" }),
+        el("li", { text: "採点は選択された問題だけが対象です。" }),
+        el("li", { text: "問題文のコピー・貼り付けはできません。解答欄とメモの間では、カット・コピー・ペーストボタンを使ってください。" }),
+        el("li", { text: "解答は自動で保存されます。残り時間が0になると、自動的に提出されます。" })
+      ])];
+    }]];
+    if (refPages) tabsDef.push(["参考資料", function () {
+      var zr = el("input", { type: "range", min: 50, max: 200, step: 10, value: refZoom });
+      var imgs = refPages.map(function (src) { return el("img", { src: src, alt: "", draggable: "false" }); });
+      function apply() { imgs.forEach(function (im) { im.style.maxWidth = (9 * refZoom) + "px"; }); }
+      zr.addEventListener("input", function () { refZoom = +zr.value; apply(); }); apply();
+      return [el("div", { style: "font-size:11px;margin-bottom:8px" }, ["拡大・縮小 ", zr])].concat(imgs);
+    }]);
+    tabsDef.push(["問題選択", function () { return [el("p", { text: "画面上部の「問題選択」ボタンで、解答する問題（大問）を選びます。「選択中：○ / ○ 問」は、選んだ問題数と選択が必要な問題数です。何度でも選び直せますが、「選択」ボタンを押すまでは反映されません。" })]; }]);
+    tabsDef.push(["問題（別画面）", function () { return [el("p", { text: "画面下部の「問題（別画面）」ボタンで、表示中の問題文を別ウィンドウに表示します。「大」「標準」でサイズを変えられます。別画面のマーカーは元の画面とは別に保持されます。" })]; }]);
+    tabsDef.push(["マーカー", function () { return [el("p", { text: "問題文の上のツールバーで、マーカーモードのオフ（通常のポインター）、赤・青・黄色のマーカー、消しゴムを切り替えます。「サイズ」で太さを変え、「クリア」で表示中の問題のマーカーを一括して消します。" })]; }]);
+    tabsDef.push(["解答欄", function () { return [el("p", { text: "選択ボタンは、もう一度押すと未解答に戻ります。1行解答欄には文字数の入力制限がある場合があります。複数行解答欄は右下に入力文字数と上限文字数が表示され、上限を超えた分は削除されます。設問番号の上のチェックボックスで「後で見直すもの」にできます。" })]; }]);
+    var tabBtns = [];
+    function showTab(i) {
+      tabBtns.forEach(function (b, j) { b.classList.toggle("on", i === j); });
+      content.innerHTML = ""; tabsDef[i][1]().forEach(function (n) { content.appendChild(n); }); content.scrollTop = 0;
+    }
+    var tabs = el("div", { class: "tabs" }, tabsDef.map(function (t, i) { var b = el("button", { text: t[0], onclick: function () { showTab(i); } }); tabBtns.push(b); return b; }));
+    function close() { refWin.remove(); refWin = null; }
+    refWin = makeWin({ titleChildren: [el("span", { text: refPages ? "参考資料" : "注意事項" }), el("span", { class: "grow" }), el("button", { class: "x", text: "×", onclick: close })],
+      body: el("div", { class: "win-body" }, [tabs, content]),
+      foot: el("div", { class: "win-foot" }, [el("button", { class: "btn navy", text: "閉じる", onclick: close })]),
+      resizable: true, style: "left:calc(50% - 380px);top:90px;width:760px;height:" + Math.round(window.innerHeight * 0.78) + "px" });
+    showTab(refPages ? 1 : 0);
+  }
+
+  // ---------------------------------------------------------------------
+  // ダイアログ・試験終了
+  // ---------------------------------------------------------------------
+  function dialog(title, message, onYes, withNo) {
+    var bg = el("div", { class: "modal-bg" }, [el("div", { class: "dialog" }, [
+      el("h4", { text: title }), el("p", { text: message, style: "white-space:pre-wrap" }),
+      el("div", { class: "row" }, [
+        el("button", { class: "btn navy", text: onYes ? "はい" : "OK", onclick: function () { bg.remove(); if (onYes) onYes(); } }),
+        (onYes && withNo !== false) ? el("button", { class: "btn navy", text: "いいえ", onclick: function () { bg.remove(); } }) : null
+      ])
+    ])]);
+    document.body.appendChild(bg);
+  }
+  function confirmEnd() {
+    if (S.selected.length < EXAM.selectionLimit) {
+      dialog("確認", "選択が必要な問題数（" + EXAM.selectionLimit + "問）に対して、選択中の問題は " + S.selected.length + " 問です。採点は選択された問題のみとなります。このまま試験を終了しますか？", function () { finishExam(false); });
+    } else {
+      dialog("確認", "科目B試験を終了します。解答を提出してよろしいですか？", function () { finishExam(false); });
+    }
+  }
+  function cleanupWindows() {
+    [selWin, memoWin, calcWin, refWin].forEach(function (w) { if (w) w.remove(); });
+    selWin = memoWin = calcWin = refWin = null;
+    if (popupState) { popupState.win.remove(); popupState = null; }
+    Array.prototype.forEach.call(document.querySelectorAll(".modal-bg"), function (n) { n.remove(); });
+  }
+  var finishing = false;
+  function finishExam(isAuto) {
+    if (finishing) return;
+    finishing = true;
+    clearInterval(timerId); clearInterval(saveTimer);
+    cleanupWindows();
+    overlay(isAuto ? "残り時間が0になりました。解答を提出しています..." : "解答を提出しています...");
+    var tries = 0;
+    (function send() {
+      api("submitExam", SESSION.id, payload(), !!isAuto).then(function (r) {
+        overlay(null); store("apcbt-gas:" + SESSION.id, null); showFinished(r, isAuto);
+      }).catch(function () {
+        tries++;
+        overlay("送信できませんでした。通信を確認しています...（" + tries + "回目）。この画面を閉じないでください。");
+        setTimeout(send, Math.min(30000, 3000 * tries));
+      });
+    })();
+  }
+  function showFinished(r, isAuto) {
+    clearInterval(timerId); clearInterval(saveTimer);
+    document.body.classList.remove("in-exam");
+    document.documentElement.classList.remove("inverted");
+    try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+    root.innerHTML = "";
+    var sel = PROBS.filter(function (P) { return S.selected.indexOf(P.qid) >= 0; }).map(function (P) { return P.label; }).join("，");
+    root.appendChild(el("div", { class: "end-wrap" }, [el("div", { class: "end-card" }, [
+      el("h2", { text: (isAuto ? "残り時間が0になったため、" : "") + "試験は終了しました。解答を提出しました。" }),
+      el("p", { text: "受験者：" + STUDENT.studentClass + "-" + STUDENT.studentNum + " " + STUDENT.studentName }),
+      el("p", { text: "試験：" + EXAM.examName }),
+      el("p", { text: "選択した問題：" + (sel || "なし") }),
+      r && r.email ? el("p", { text: "解答の控えを " + r.email + " 宛に送信しました（設定によっては送信されません）。" }) : null,
+      el("div", { class: "btns" }, [el("button", { class: "btn navy", text: "試験一覧へ", onclick: function () { finishing = false; boot(); } })])
+    ])]));
+  }
+
+  // ======================================================================
+  // 解答例との見比べ（練習用）
+  // ======================================================================
+  function norm(s) { return toHalf(s).replace(/[\s,，、。．.]/g, "").toLowerCase(); }
+  function openReview(examId) {
+    overlay("読み込み中...");
+    api("getReviewData", examId).then(function (d) {
+      overlay(null);
+      var exam = d.exam, sel = d.session.selected, answers = (d.session.data && d.session.data.answers) || {};
+      root.innerHTML = "";
+      var wrap = el("div", { class: "review" }, [el("h2", { text: "解答例と見比べる（" + exam.examName + "）" })]);
+      exam.questions.forEach(function (q) {
+        if (!(q.required || sel.indexOf(q.questionId) >= 0)) return;
+        var tbl = el("table", null, [el("tr", null, [el("th", { text: "設問", style: "width:130px" }), el("th", { text: "あなたの解答" }), el("th", { text: "解答例" }), el("th", { text: "", style: "width:40px" })])]);
+        q.subQuestions.forEach(function (sq) {
+          var v = answers[sq.sub_q_id]; v = Array.isArray(v) ? v.join("，") : (v || "");
+          var objective = sq.type === "選択" || sq.type === "多答";
+          var ok = objective && sq.answer && norm(v) === norm(sq.answer);
+          tbl.appendChild(el("tr", null, [
+            el("td", { text: sq.sub_q_number }), el("td", { class: "mine", text: v || "（未解答）" }),
+            el("td", null, [el("div", { class: "model", text: sq.answer || "（解答例未登録）" }), sq.note ? el("div", { class: "note", text: "※" + sq.note }) : null]),
+            el("td", null, [objective && sq.answer ? el("span", { class: ok ? "auto-ok" : "auto-ng", text: ok ? "○" : "×" }) : null])
+          ]));
+        });
+        wrap.appendChild(el("div", { class: "review-prob" }, [el("h3", { text: q.qNumber + "　" + (q.category || "") + "　" + (q.theme || "") }), tbl]));
+      });
+      wrap.appendChild(el("p", { style: "font-size:12px;color:#666", text: "解答例は IPA 公表の「解答例」によります。記述式は採点講評もあわせて確認してください。" }));
+      wrap.appendChild(el("button", { class: "btn", text: "試験一覧へ", onclick: boot, style: "height:30px" }));
+      root.appendChild(el("div", { class: "top-wrap" }, [wrap]));
+    }).catch(function (err) { overlay(null); dialog("確認", String(err.message || err), null); });
+  }
+
+  boot();
+})();
+</script>

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <style>
+    :root { --navy: #173a6e; --line: #cfd5de; --bg: #f2f3f5; --red: #c62828; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: #222; font: 13px/1.6 "Meiryo", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Noto Sans JP", sans-serif; }
+    header { background: var(--navy); color: #fff; padding: 10px 18px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    header h1 { font-size: 16px; margin: 0; font-weight: normal; }
+    header select { height: 30px; font-size: 13px; min-width: 280px; }
+    nav { display: flex; gap: 4px; margin-left: auto; }
+    nav button { background: transparent; border: 1px solid rgba(255,255,255,.5); color: #fff; height: 30px; padding: 0 14px; cursor: pointer; }
+    nav button.on { background: #fff; color: var(--navy); }
+    main { padding: 14px 18px 60px; max-width: 1400px; margin: 0 auto; }
+    .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    .btn { height: 28px; padding: 0 12px; border: 1px solid #8892a0; background: #fff; cursor: pointer; font-size: 12px; }
+    .btn.navy { background: var(--navy); color: #fff; border-color: var(--navy); }
+    .btn:disabled { opacity: .5; cursor: default; }
+    table { border-collapse: collapse; width: 100%; background: #fff; }
+    th, td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; vertical-align: top; }
+    th { background: #e8ecf2; font-weight: normal; position: sticky; top: 0; }
+    .st-doing { color: #8a6d00; font-weight: bold; }
+    .st-done { color: #2e7d32; }
+    .warn { color: var(--red); font-weight: bold; }
+    .muted { color: #777; }
+    .card { background: #fff; border: 1px solid var(--line); margin-bottom: 14px; }
+    .card h3 { margin: 0; padding: 8px 12px; background: #e8ecf2; font-size: 14px; font-weight: normal; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+    .model { color: #0b5b2a; white-space: pre-wrap; }
+    .ans { white-space: pre-wrap; word-break: break-all; }
+    .mark { display: flex; gap: 3px; }
+    .mark button { width: 28px; height: 24px; border: 1px solid #aaa; background: #fff; cursor: pointer; }
+    .mark button.on.o { background: #2f9e44; color: #fff; border-color: #2f9e44; }
+    .mark button.on.t { background: #f0a500; color: #fff; border-color: #f0a500; }
+    .mark button.on.x { background: #d6336c; color: #fff; border-color: #d6336c; }
+    .pill { display: inline-block; padding: 0 8px; border-radius: 10px; background: #eef1f5; font-size: 12px; }
+    .msg { padding: 8px 12px; background: #fff8d6; border: 1px solid #e6cf60; margin-bottom: 10px; }
+    .loading { padding: 30px; text-align: center; color: #666; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CBT模擬試験 教員画面</h1>
+    <select id="examSel"></select>
+    <nav>
+      <button data-tab="status" class="on">実施状況</button>
+      <button data-tab="grade">採点</button>
+      <button data-tab="export">成績出力</button>
+    </nav>
+  </header>
+  <main id="main"><div class="loading">読み込み中...</div></main>
+<script>
+(function () {
+  "use strict";
+  function el(tag, attrs, children) {
+    var e = document.createElement(tag);
+    if (attrs) for (var k in attrs) {
+      var v = attrs[k]; if (v == null || v === false) continue;
+      if (k === "class") e.className = v; else if (k === "text") e.textContent = v;
+      else if (k.slice(0, 2) === "on") e.addEventListener(k.slice(2), v);
+      else if (k === "style") e.style.cssText = v; else e.setAttribute(k, v === true ? "" : v);
+    }
+    (children || []).forEach(function (c) { if (c == null || c === false) return; e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return e;
+  }
+  function api(name) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (res, rej) { var r = google.script.run.withSuccessHandler(res).withFailureHandler(rej); r[name].apply(r, args); });
+  }
+  function fmt(t) { if (!t) return ""; var d = new Date(t); return (d.getMonth() + 1) + "/" + d.getDate() + " " + d.toTimeString().slice(0, 5); }
+  function toHalf(s) { return String(s || "").replace(/[０-９Ａ-Ｚａ-ｚ（）]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }); }
+  function norm(s) { return toHalf(s).replace(/[\s,，、。．.]/g, "").toLowerCase(); }
+
+  var main = document.getElementById("main"), examSel = document.getElementById("examSel");
+  var tab = "status", examId = "", refreshTimer = 0;
+
+  Array.prototype.forEach.call(document.querySelectorAll("nav button"), function (b) {
+    b.addEventListener("click", function () {
+      Array.prototype.forEach.call(document.querySelectorAll("nav button"), function (x) { x.classList.toggle("on", x === b); });
+      tab = b.getAttribute("data-tab"); render();
+    });
+  });
+  examSel.addEventListener("change", function () { examId = examSel.value; render(); });
+
+  api("teacherListExams").then(function (list) {
+    list.forEach(function (e) {
+      examSel.appendChild(el("option", { value: e.examId, text: e.examName + "（" + e.kind + "）  受験中" + e.inProgress + "・提出" + e.submitted }));
+    });
+    var firstActive = list.filter(function (e) { return e.inProgress > 0; })[0] || list[0];
+    if (firstActive) { examSel.value = firstActive.examId; examId = firstActive.examId; }
+    render();
+  }).catch(showErr);
+
+  function showErr(err) { main.innerHTML = ""; main.appendChild(el("div", { class: "msg", text: "エラー: " + (err && err.message || err) })); }
+  function render() {
+    clearInterval(refreshTimer);
+    if (!examId) { main.innerHTML = '<div class="loading">試験がありません。</div>'; return; }
+    if (tab === "status") renderStatus();
+    else if (tab === "grade") renderGrade();
+    else renderExport();
+  }
+
+  // ---------------- 実施状況 ----------------
+  function renderStatus() {
+    main.innerHTML = '<div class="loading">読み込み中...</div>';
+    var checked = {};
+    function load() {
+      api("teacherStatus", examId).then(function (d) {
+        var offset = d.serverNow - Date.now();
+        main.innerHTML = "";
+        var min = el("input", { type: "number", value: 10, style: "width:64px;height:28px" });
+        var counts = { doing: 0, done: 0 };
+        d.rows.forEach(function (r) { if (r.status === "受験中") counts.doing++; else if (r.status === "提出済み") counts.done++; });
+        main.appendChild(el("div", { class: "bar" }, [
+          el("span", { class: "pill", text: "受験中 " + counts.doing }), el("span", { class: "pill", text: "提出済み " + counts.done }),
+          el("span", { class: "muted", text: "（20秒ごとに更新）" }),
+          el("span", { style: "margin-left:auto" }, ["チェックした受験者の時間を ", min, " 分 "]),
+          el("button", { class: "btn navy", text: "延長する", onclick: function () { act("teacherExtend", +min.value); } }),
+          el("button", { class: "btn", text: "受験中に戻す（＋上の分数）", onclick: function () { act("teacherReopen", +min.value); } })
+        ]));
+        var all = el("input", { type: "checkbox" });
+        all.addEventListener("change", function () { d.rows.forEach(function (r) { checked[r.id] = all.checked; }); load(); });
+        var tbl = el("table", null, [el("tr", null, [el("th", null, [all]), el("th", { text: "クラス" }), el("th", { text: "番号" }), el("th", { text: "氏名" }),
+          el("th", { text: "状態" }), el("th", { text: "残り時間" }), el("th", { text: "延長" }), el("th", { text: "最終保存" }), el("th", { text: "選択問題" }),
+          el("th", { text: "解答済み欄" }), el("th", { text: "画面離脱" }), el("th", { text: "本人確認" })])]);
+        d.rows.forEach(function (r) {
+          var cb = el("input", { type: "checkbox", checked: !!checked[r.id] });
+          cb.addEventListener("change", function () { checked[r.id] = cb.checked; });
+          var remain = "";
+          if (r.status === "受験中") { var ms = r.endAt - (Date.now() + offset); remain = ms > 0 ? Math.floor(ms / 60000) + "分" : "時間切れ"; }
+          var stale = r.status === "受験中" && r.savedAt && (Date.now() + offset - r.savedAt) > 3 * 60000;
+          tbl.appendChild(el("tr", null, [el("td", null, [cb]), el("td", { text: r.studentClass }), el("td", { text: r.studentNum }), el("td", { text: r.studentName }),
+            el("td", { class: r.status === "受験中" ? "st-doing" : "st-done", text: r.status }), el("td", { text: remain }),
+            el("td", { text: r.extendMin ? r.extendMin + "分" : "" }),
+            el("td", { class: stale ? "warn" : "", text: fmt(r.savedAt) + (stale ? "（3分以上保存なし）" : "") }),
+            el("td", { text: r.selected.join(",") }), el("td", { text: r.answered }),
+            el("td", { class: r.leaveCount >= 3 ? "warn" : "", text: r.leaveCount || "" }),
+            el("td", { class: r.roster === "名簿" ? "" : "warn", text: r.roster === "名簿" ? "名簿" : "手入力（" + r.email + "）" })]));
+        });
+        if (!d.rows.length) tbl.appendChild(el("tr", null, [el("td", { colspan: 12, class: "muted", text: "まだ受験者はいません。" })]));
+        main.appendChild(tbl);
+        function act(fn, m) {
+          var ids = d.rows.filter(function (r) { return checked[r.id]; }).map(function (r) { return r.id; });
+          if (!ids.length) { alert("受験者をチェックしてください。"); return; }
+          if (!confirm(ids.length + " 名に対して実行します。よろしいですか？")) return;
+          api(fn, ids, m).then(load).catch(showErr);
+        }
+      }).catch(showErr);
+    }
+    load();
+    refreshTimer = setInterval(load, 20000);
+  }
+
+  // ---------------- 採点 ----------------
+  var G = null, patch = {}, saveT = 0;
+  function renderGrade() {
+    main.innerHTML = '<div class="loading">読み込み中...</div>';
+    api("teacherGradingData", examId).then(function (d) {
+      G = d; patch = {};
+      var qSel = el("select", { style: "height:28px" }, d.exam.questions.map(function (q, i) { return el("option", { value: i, text: q.qNumber + "　" + (q.category || "") + "　" + (q.theme || "") }); }));
+      var area = el("div");
+      var state = el("span", { class: "muted" });
+      main.innerHTML = "";
+      main.appendChild(el("div", { class: "bar" }, [
+        "大問：", qSel,
+        el("button", { class: "btn", text: "記号の設問を自動採点（未採点のみ）", onclick: function () { autoMark(+qSel.value); drawQ(+qSel.value); } }),
+        el("button", { class: "btn navy", text: "保存", onclick: flush }), state
+      ]));
+      main.appendChild(el("div", { class: "msg", text: "設問ごとに、その大問を選択した受験者の解答を並べています。○＝1、△＝0.5、×＝0 として成績出力で集計します（配点列があればその値で重み付け）。採点はクリックの数秒後に自動で保存されます。" }));
+      main.appendChild(area);
+      qSel.addEventListener("change", function () { drawQ(+qSel.value); });
+      function drawQ(qi) {
+        var q = G.exam.questions[qi];
+        var targets = G.sessions.filter(function (s) { return q.required || s.selected.indexOf(q.questionId) >= 0; });
+        area.innerHTML = "";
+        if (!targets.length) { area.appendChild(el("p", { class: "muted", text: "この大問を選択した受験者はいません。" })); return; }
+        q.subQuestions.forEach(function (sq) {
+          if (sq.type === "図表") return;
+          var tbl = el("table", null, [el("tr", null, [el("th", { text: "クラス-番号", style: "width:110px" }), el("th", { text: "氏名", style: "width:140px" }), el("th", { text: "解答" }), el("th", { text: "採点", style: "width:110px" })])]);
+          targets.forEach(function (s) {
+            var v = s.answers[sq.sub_q_id]; v = Array.isArray(v) ? v.join("，") : (v || "");
+            var box = el("div", { class: "mark" });
+            [["o", "○"], ["t", "△"], ["x", "×"]].forEach(function (m) {
+              var b = el("button", { class: m[0] + (s.grades[sq.sub_q_id] === m[0] ? " on" : ""), text: m[1], onclick: function () {
+                var nv = s.grades[sq.sub_q_id] === m[0] ? "" : m[0];
+                if (nv) s.grades[sq.sub_q_id] = nv; else delete s.grades[sq.sub_q_id];
+                (patch[s.id] = patch[s.id] || {})[sq.sub_q_id] = nv;
+                Array.prototype.forEach.call(box.children, function (c) { c.classList.remove("on"); });
+                if (nv) b.classList.add("on");
+                state.textContent = "未保存の採点があります"; clearTimeout(saveT); saveT = setTimeout(flush, 3000);
+              } });
+              box.appendChild(b);
+            });
+            tbl.appendChild(el("tr", null, [el("td", { text: s.studentClass + "-" + s.studentNum }), el("td", { text: s.studentName }),
+              el("td", { class: "ans", text: v || "（未解答）" }), el("td", null, [box])]));
+          });
+          area.appendChild(el("div", { class: "card" }, [el("h3", null, [el("b", { text: sq.sub_q_number }), el("span", { class: "model", text: "解答例：" + (sq.answer || "（未登録）") }), sq.note ? el("span", { class: "muted", text: "※" + sq.note }) : null]), tbl]));
+        });
+      }
+      function autoMark(qi) {
+        var q = G.exam.questions[qi];
+        G.sessions.forEach(function (s) {
+          if (!(q.required || s.selected.indexOf(q.questionId) >= 0)) return;
+          q.subQuestions.forEach(function (sq) {
+            if (!(sq.type === "選択" || sq.type === "多答") || !sq.answer || s.grades[sq.sub_q_id]) return;
+            var v = s.answers[sq.sub_q_id]; v = Array.isArray(v) ? v.join("") : (v || "");
+            var g = norm(v) === norm(sq.answer) ? "o" : "x";
+            s.grades[sq.sub_q_id] = g; (patch[s.id] = patch[s.id] || {})[sq.sub_q_id] = g;
+          });
+        });
+        state.textContent = "未保存の採点があります"; clearTimeout(saveT); saveT = setTimeout(flush, 1000);
+      }
+      function flush() {
+        clearTimeout(saveT);
+        if (!Object.keys(patch).length) { state.textContent = "保存済み"; return; }
+        var p = patch; patch = {};
+        state.textContent = "保存中...";
+        api("teacherSaveGrades", p).then(function () { state.textContent = "保存済み " + new Date().toTimeString().slice(0, 5); })
+          .catch(function (err) { Object.keys(p).forEach(function (k) { patch[k] = Object.assign(p[k], patch[k] || {}); }); state.textContent = "保存に失敗しました: " + err; });
+      }
+      drawQ(0);
+    }).catch(showErr);
+  }
+
+  // ---------------- 成績出力 ----------------
+  function renderExport() {
+    main.innerHTML = "";
+    var out = el("div");
+    main.appendChild(el("div", { class: "card" }, [el("h3", { text: "成績をスプレッドシートに出力" }), el("div", { style: "padding:12px" }, [
+      el("p", { text: "「成績_試験ID」シートに、受験者ごとの大問別得点率（○=1、△=0.5、×=0）と未採点の設問数を書き出します。何度実行しても上書きされます。" }),
+      el("button", { class: "btn navy", text: "出力する", onclick: function () {
+        out.textContent = "出力中...";
+        api("teacherExportScores", examId).then(function (r) {
+          out.innerHTML = ""; out.appendChild(el("a", { href: r.url, target: "_blank", text: r.sheetName + " を開く" }));
+        }).catch(function (e) { out.textContent = "エラー: " + e; });
+      } }), out,
+      el("p", { class: "muted", text: "受験者ごとに改ページした採点用ドキュメントは、スプレッドシートのメニュー「CBT模試 → 採点用ドキュメントを出力」から作れます。" })
+    ])]));
+  }
+})();
+</script>
+</body>
+</html>
